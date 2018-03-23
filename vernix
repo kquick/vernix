@@ -828,7 +828,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
             # cabal2nix into a store location (providing common,
             # referenced storage and avoids re-downloading each time).
             self.c2nr = self.createActor(CabalPrefetch)
-            gencabal = False
+            self.gencabal = False
 
             self.wf = self.createActor(WriteFile)
 
@@ -873,7 +873,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
             elif isinstance(each, Project):
                 continue
             elif isinstance(each, LocalPackage):
-                if gencabal:
+                if self.gencabal:
                     each.noisily = self.noisy
                     self.send(self.c2nr, each)
                     self.status.add_setup_local()
