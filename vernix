@@ -123,10 +123,11 @@ class LocalPackage(HaskellPackage):
 
 
 class Error(object):
-    def __init__(self, msg):
+    def __init__(self, msg, attempting):
         self.msg = msg
+        self.attempting = attempting
     def __repr__(self):
-        return 'Error(' + repr(self.msg) + ')'
+        return 'Error(' + repr(self.msg) + ' << attempting ' + repr(self.attempting) + ')'
 
 class Success(object):
     def __init__(self, data):
@@ -262,7 +263,8 @@ class GitBranchRef(ActorTypeDispatcher):
         self.troupe_work_in_progress = False
         self.send(sender, ActorExitRequest())
         if cmdres.exitcode:
-            self.send(self.requestor, Error((cmdres.command.reqmsg.name, cmdres.errorstr)))
+            self.send(self.requestor, Error((cmdres.command.reqmsg.name, cmdres.errorstr),
+                                            'GitBranchRef cmdresult'))
             return
         lines = cmdres.stdout.split('\n')
         name = cmdres.command.reqmsg.name
@@ -278,7 +280,8 @@ class GitBranchRef(ActorTypeDispatcher):
             if set(branch) - set('0123456789abcdef'):
                 self.send(self.requestor, Error((name,
                                                  'No match for branch %s in repo %s' %
-                                                 (branch, repo))))
+                                                 (branch, repo)),
+                                                'GitBranchRef no matches'))
             else:
                 self.send(self.requestor, GitRef(name=name, branch=branch, ref=branch,
                                                  reporef=reporef,
@@ -287,7 +290,8 @@ class GitBranchRef(ActorTypeDispatcher):
             self.send(self.requestor,
                       Error((name,
                             'Multiple matches for branch %s in repo %s: %s' %
-                            (branch, repo, match))))
+                             (branch, repo, match)),
+                            'GitBranchRef multiple matches'))
         else:
             self.send(self.requestor, GitRef(name=name, branch=branch, ref=match[0].split('\t')[0],
                                              reporef=reporef,
@@ -374,7 +378,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            cmdres.command.requestor)
     def _postproc(self, name, version, cmdres, sender, line_op=None):
         if cmdres.exitcode:
-            self.send(sender, Error((name, cmdres.errorstr)))
+            self.send(sender, Error((name, cmdres.errorstr), 'Cabal2Nix'))
             return
         lines = [line_op(l) if line_op else
                  l for l in cmdres.stdout.split('\n')]
@@ -435,7 +439,8 @@ class CabalPrefetch(ActorTypeDispatcher, AutoCreate):
             errmsg = Error((cmdres.command.tag.name
                             if isinstance(cmdres.command.tag, GitRef) else
                             cmdres.command.tag.pkgname,
-                            cmdres.errorstr))
+                            cmdres.errorstr),
+                           'CabalPrefetch')
             errmsg.tag = cmdres.command.tag
             self.send(cmdres.command.requestor, errmsg)
             return
@@ -480,7 +485,8 @@ class NixExprEval(ActorTypeDispatcher, AutoCreate):
 
     def receiveMsg_CommandResult(self, res, sender):
         self.send(res.command._nee_requestor,
-                  Error(('Evaluating nix: ' + res.command.args[2], res.exitcode, res.errorstr))
+                  Error(('Evaluating nix: ' + res.command.args[2], res.exitcode, res.errorstr),
+                        'NixExprEval')
                   if res.exitcode else Success(res.stdout))
 
 
@@ -493,7 +499,7 @@ class NixGHCCompilers(ActorTypeDispatcher):
     """
     def receiveMsg_str(self, reqmsg, sender):
         if reqmsg != "get":
-            self.send(sender, Error('Unknown request: ' + reqmsg))
+            self.send(sender, Error('Unknown request: ' + reqmsg, 'NixGHCCompilers'))
             return
         nixeval = self.createActor(NixExprEval)
         self.send(nixeval, 'with import <nixpkgs> {}; builtins.attrNames pkgs.haskell.compiler')
@@ -512,7 +518,8 @@ class NixGHCCompilers(ActorTypeDispatcher):
         self.send(self.requestor, errmsg)
         self.send(sender, ActorExitRequest())
     def receiveMsg_PoisonMessage(self, poisonmsg, sender):
-        self.send(self.requestor, Error(('Unable to obtain compiler list', poisonmsg)))
+        self.send(self.requestor, Error(('Unable to obtain compiler list', poisonmsg),
+                                        'NixGHCCompilers'))
 
 # --------------------
 
@@ -1052,7 +1059,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
         try:
             repo, errstr = errormsg.msg
             if repo in self.nixfiles:
-                self.nixfiles[repo] = Error(errstr)
+                self.nixfiles[repo] = Error(errstr, errormsg.attempting)
                 self._check_done()
                 return
         except Exception as ex:
@@ -1065,7 +1072,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
             if self.nixfiles[r] is None:
                 return
             if isinstance(self.nixfiles[r], Error):
-                errors.append('%s ERROR:: %s' % (r, self.nixfiles[r].msg))
+                errors.append('%s ERROR:: %s' % (r, repr(self.nixfiles[r])))
         # All the files were written, now fail or write the overlay file
         if errors:
             self.send(self.requestor, errors)
