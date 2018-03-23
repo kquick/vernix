@@ -93,10 +93,11 @@ class RepoPackage(HaskellPackage):
         self.reposerver = reposerver
         self.reponame = reponame or name
         self.subpath = subpath
+        self.sep1 = ':' if self.reposerver.startswith('git@') else '/'
 
     @property
     def source_loc(self):
-        return '/'.join([self.reposerver, self.team, self.reponame]) #+ '.git'
+        return '%(reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
 
 
 class Package(HaskellPackage):
@@ -249,9 +250,7 @@ class GitBranchRef(ActorTypeDispatcher):
     """
     def receiveMsg_RepoPackage(self, repomsg, sender):
         run = self.createActor(RunCommand)
-        cmd = Command('git', ['ls-remote', '/'.join([repomsg.reposerver,
-                                                     repomsg.team,
-                                                     repomsg.reponame + '.git'])],
+        cmd = Command('git', ['ls-remote', repomsg.source_loc],
                       logger=None if getattr(repomsg, 'noisily', False) else False,
                       logtag='git:ls-remote',
                       error_ok=not getattr(repomsg, 'noisily', False))
@@ -270,7 +269,7 @@ class GitBranchRef(ActorTypeDispatcher):
         repo = cmdres.command.reqmsg.reposerver + '/' + cmdres.command.reqmsg.team
         branch = cmdres.command.reqmsg.version
         match = list(filter(lambda l: l and l[-(len(branch)+1):] == '/' + branch, lines))
-        reporef = repo + '/' + cmdres.command.reqmsg.reponame
+        reporef = cmdres.command.reqmsg.source_loc
         if len(match) == 0:
             # This does not match a branch name.  If all characters
             # are hex chars, it may simply be a sha reference which
@@ -338,7 +337,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         args = ['--revision', refmsg.ref]
         if refmsg.subpath:
             args.extend(['--subpath', refmsg.subpath])
-        cmd = Command('cabal2nix', args + [refmsg.reporef + '.git'],
+        cmd = Command('cabal2nix', args + [refmsg.reporef],
                       logger=None if getattr(refmsg, 'noisily', False) else False,
                       logtag='cabal2nix:git',
                       error_ok=not getattr(refmsg, 'noisily', False))
@@ -406,7 +405,7 @@ class CabalPrefetch(ActorTypeDispatcher, AutoCreate):
     create_run = lambda self: self.createActor(RunCommand)
 
     def receiveMsg_GitRef(self, refmsg, sender):
-        cmd = Command('nix-prefetch-git', [refmsg.reporef + '.git', refmsg.ref],
+        cmd = Command('nix-prefetch-git', [refmsg.reporef, refmsg.ref],
                       logger=None if getattr(refmsg, 'noisily', False) else False,
                       logtag='prefetch:git',
                       error_ok=not getattr(refmsg, 'noisily', False))
