@@ -798,9 +798,10 @@ class ReadPackageSpec(ActorTypeDispatcher):
 
         for each in glob.glob(
                 os.path.join(os.path.dirname(package_file), '*.nix')):
-            name = os.path.splitext(os.path.basename(each))[0]
+            name = os.path.splitext(os.path.basename(each))[0].replace(".", "_")
+            nixfile = os.path.join(".", each) if os.path.basename(each) == each else each
             self.send(sender,
-                      NixPackageSpec(StandardPackage(name), each))
+                      NixPackageSpec(StandardPackage(name), nixfile))
 
 
 class GenerateNixInfo(ActorTypeDispatcher):
