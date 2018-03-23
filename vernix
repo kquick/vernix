@@ -727,7 +727,7 @@ class ProjectConfig(SummaryBase):
         sample_pkgname = self.nixpackage_list[0].package.name
         contents = (
             [ '{ nixpkgs ? <nixpkgs>',
-              ', runtime ? "ghc821"',
+              ', runtime ? "ghc822"',
               '}:',
               'let',
               '  config = {',
