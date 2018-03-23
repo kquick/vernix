@@ -1260,7 +1260,7 @@ def gen_nix(noisy=False, allowUnfree=False, frequency=None,
             if isinstance(resp[t], Error):
                 rval = rval + 1
     else:
-        print('resp:',str(resp))
+        print('Unexpected resp:',str(resp))
     return rval
 
 
