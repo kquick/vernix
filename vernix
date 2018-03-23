@@ -220,7 +220,7 @@ class GitBranchRef(ActorTypeDispatcher):
         name = cmdres.command.reqmsg.name
         repo = cmdres.command.reqmsg.reposerver + '/' + cmdres.command.reqmsg.team
         branch = cmdres.command.reqmsg.version
-        match = list(filter(lambda l: l and l[-len(branch):] == branch, lines))
+        match = list(filter(lambda l: l and l[-(len(branch)+1):] == '/' + branch, lines))
         reporef = repo + '/' + cmdres.command.reqmsg.reponame
         if len(match) == 0:
             # This does not match a branch name.  If all characters
