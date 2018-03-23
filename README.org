@@ -14,6 +14,11 @@ This is a tool to generate nix expressions for packages with specific versions.
 
 *** Notes
 
+[[https://git.io/vx4pk][An example ~package_spec~]] for building the Matterhorn client for
+Mattermost.  This client is written in Haskell.  The client itself is
+loaded from github and there are some specific Haskell package version
+overrides.
+
 The default project.nix file generated will automatically check the
 source locations each time a nix evaluation is performed
 (e.g. ~nix-shell~ or ~nix-build~) and therefore update to any recent
