@@ -472,6 +472,8 @@ class NixPackageSpec(object):
         self.package = package  # PackageCommon
         self.package_name = package.name
         self.nix_source = nix_filename_or_prefetch_sha256
+    def __lt__(self, o):
+        return self.package_name < o.package_name
 
 
 class SummaryBase(ActorTypeDispatcher):
@@ -608,10 +610,10 @@ class ProjectConfig(SummaryBase):
         project_fname = os.path.basename(self.summary_fname)
         project_name = os.path.splitext(project_fname)[0]
         package_refs = [self._package_ref(pkg)
-                        for pkg in self.nixpackage_list
+                        for pkg in sorted(self.nixpackage_list)
                         if isinstance(pkg.package, HaskellPackage)]
         top_level_refs = [self._toplevel_ref(pkg)
-                          for pkg in self.nixpackage_list
+                          for pkg in sorted(self.nixpackage_list)
                           if isinstance(pkg.package, HaskellPackage)]
         sample_pkgname = self.nixpackage_list[0].package.name
         contents = (
