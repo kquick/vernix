@@ -1,6 +1,11 @@
 #! /usr/bin/env nix-shell
 # -*- mode: python; -*-
-#! nix-shell -i 'python3.6 -u' -p cabal2nix nix-prefetch-scripts git haskell.compiler.ghc802 git 'python36.withPackages(pp: with pp; [ thespian setproctitle blessings progressive ])'
+#! nix-shell -i 'python3.6 -u' -p cabal2nix nix-prefetch-scripts git haskell.compiler.ghc802 git 'python36.withPackages(pp: with pp; [ thespian setproctitle ])'
+
+# n.b. to add fancy progress bars, add both blessings and progressive
+# to the packages list above, but note that progressive is not
+# currently part of the standard nix specifications and so an overlay
+# will probably be needed.
 
 from thespian.actors import *
 from thespian.runcommand import *
