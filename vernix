@@ -817,7 +817,9 @@ class ProjectConfig(SummaryBase):
             return (pkg.package.source_loc, '"' + pkg.nix_source.sha256 + '"')
         if getattr(pkg.nix_source, 'fetchspec', None):
             return ('(p.%s)' % pkg.nix_source.fetchspec, 'null')
-        return (pkg.nix_source, 'null')
+        # This is a local directory.  Exclude build output paths to ensure a clean build.
+        clean_local_source = lambda s: '(cleanupSource %s)' % s
+        return (clean_local_source(pkg.nix_source), 'null')
 
     def _toplevel_ref(self, pkg):
         fmt = '    %(package_name)s = pkgs.haskell.packages.${runtime}.%(package_name)s;'
@@ -826,6 +828,12 @@ class ProjectConfig(SummaryBase):
     def constant_nixspec(self):
         dateStamp = datetime.now().strftime(self.frequency)
         return ['''
+
+  cleanupSource =
+    builtins.filterSource (path: type:
+      let nm = baseNameOf path;
+        in type != "directory" ||
+           !(builtins.elem nm ["dist" "dist-newstyle" ".git" "_darcs"]));
 
   # The following are slight modifications to the contents of
   # nixpkgs/pkgs/development/haskell-modules/make-package-set.nix to
