@@ -1288,7 +1288,11 @@ There should only be one Project, which helps specify the output file.  A packag
 is obtained from Hackage, a RepoPackage is obtained from a github (or similar) repo,
 and a LocalPackage is obtained from a local directory.
 
-    Note: to avoid repeated queries for git credentials:
+    Note: to avoid repeated queries for git credentials, use either
+          the git credential helper cache (with http repo
+          specifications) and/or the ssh-agent (with git SSH repo
+          specifications).  To setup the git credential helper cache:
+
         $ mkdir $HOME/.cache/git
         $ export XDG_CACHE_HOME=$HOME/.cache
         $ echo !! >> .bashrc
