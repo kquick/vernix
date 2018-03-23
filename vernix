@@ -572,7 +572,7 @@ class SummaryBase(ActorTypeDispatcher):
         super(SummaryBase, self).__init__(*args, **kw)
         self.nixpackage_list = []
         self.allowUnfree = False
-        self.frequency = '%Y-%W'
+        self.frequency = '%Y-w%W'
 
     def receiveMsg_NixPackageSpec(self, pkgmsg, sender):
         # Gets called for each nix file written.  Keep a list of the
@@ -600,9 +600,9 @@ class SummaryBase(ActorTypeDispatcher):
             return
         if strmsg.startswith('update:'):
             if strmsg == 'update:hourly':
-                self.frequency = '%Y-%W-%d-%H'
+                self.frequency = '%Y-w%W-d%u-h%H'
             elif strmsg == 'update:daily':
-                self.frequency = '%Y-%W-%d'
+                self.frequency = '%Y-w%W-d%u'
             return
         # This is the filename to write, and is sent after all the
         # (Success) messages about individual packages.  Write out the
