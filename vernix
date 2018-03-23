@@ -16,6 +16,10 @@ import glob
 from datetime import datetime
 
 
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Messages that can be passed
+
 class Project(object):
     def __init__(self, name):
         self.name = name
@@ -112,7 +116,6 @@ class LocalPackage(HaskellPackage):
         return self.localdir + ' directory'
 
 
-
 class Error(object):
     def __init__(self, msg):
         self.msg = msg
@@ -128,6 +131,12 @@ class Success(object):
 # --------------------
 
 class ProgressStatus(object):
+    """This message is sent periodically by the main coordination actor to
+       the user to indicate the general progress.  Progress is
+       maintained in the status dictionary where the keys are the
+       areas of effort and the values are a tuple of (current, total)
+       for that area.  Note that the total may rise over time.
+    """
     def __init__(self, num_packages=1):
         # Steps: get_info, setup_local_nix, write_file, get_compilers, write_project_file
         self.status = { 'get_info': (0, 0),
@@ -163,9 +172,18 @@ class ProgressStatus(object):
         self._add_to_count('write_result')
 
 
-# --------------------
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Thespian helpers
 
-class AutoCreate(object):
+class AutoCreate(object):  # KWQ: could be in Thespian
+    """Thespian helper base object: if there is a reference to self.NAME
+       and there exists a create_NAME attribute on self, call the
+       function specified by that attribute and use the return value
+       as self.NAME.  If a subsequent ChildActorExited is received
+       with that name, destroy the self.NAME reference (it will be
+       created anew on the next reference).
+    """
     def __getattr__(self, name):
         creator = None if name.startswith('create_') else getattr(self, 'create_' + name, None)
         if not creator:
@@ -186,17 +204,44 @@ class AutoCreate(object):
 
 # --------------------
 
+class WriteFile(ActorTypeDispatcher):
+    """When passed a tuple message containing a tag, filename, and list of
+       lines, this will write the lines to the named file and then
+       send back a Success message with the tag and filename.
+    """
+    def receiveMsg_tuple(self, writemsg, sender):
+        tag, fname, flines = writemsg
+        with open(os.path.expandvars(
+                os.path.expanduser(fname)), 'w') as cabalfile:
+            cabalfile.writelines([l + '\n' for l in flines])
+        self.send(sender, Success( (tag, fname) ))
+
+
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Querying git repos
+
 class GitRef(object):
+    """Reference to a specific git patch."""
     def __init__(self, name, branch, ref, reporef, subpath=None):
-        self.name = name
-        self.reporef = reporef
-        self.branch = branch
-        self.ref = ref
-        self.subpath = subpath
+        self.name = name        # The name from the input RepoPackage
+        self.reporef = reporef  # The repository reference (url + repo name)
+        self.branch = branch    # The version from the input RepoPackage
+        self.ref = ref          # The patch reference within the repository  KWQ: patchref
+        self.subpath = subpath  # the subpath in the repo where this package lives (from RepoPackage)
 
 
 #@troupe()
+# n.b. this is not run as a troupe because it has the
+# potential to cause a getpassword query, and multiple of these
+# password queries cannot be entertained simultaneously.
+
 class GitBranchRef(ActorTypeDispatcher):
+    """Given a RepoPackage message, which has a git reference (a branch
+       name, a tag, or a revision hash), determine the specific git
+       patch being referenced and return a GitRef object which
+       describes that specific git patch.
+    """
     def receiveMsg_RepoPackage(self, repomsg, sender):
         run = self.createActor(RunCommand)
         cmd = Command('git', ['ls-remote', '/'.join([repomsg.reposerver,
@@ -244,26 +289,44 @@ class GitBranchRef(ActorTypeDispatcher):
                                              reporef=reporef,
                                              subpath=cmdres.command.reqmsg.subpath))
 
+    # def receiveUnrecognizedMessage(self, msg, sender):
+    #     logging.critical('GBR: GOT UNREC FROM %s: %s', sender, msg)
 
-# --------------------
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Cabal information
+
 
 class CabalSpec(object):
+    """The nix specification for a specific cabal package as obtained from
+       cabal2nix
+    """
     def __init__(self, name, version, lines):
         self.name = name
         self.version = version
         self.spec_lines = lines
 
+
 class HackageRef(object):
+    "Reference to a Haskell package on the Hackage server."
     def __init__(self, name, ver, noisily=False):
         self.pkgname = name
         self.pkgver = ver
         self.noisily = noisily
 
+
 # Enable parallel access, but only a very limited amount: running too
 # many cabal2nix in parallel will cause them to busywait/deadlock and
-# the operations will time out.
-#@troupe(max_count=2)
+# the operations will time out.  This seems to be a limitation of
+# cabal2nix and/or nix itself.
+@troupe(max_count=2)
 class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
+    """Upon receipt of a GitRef or HackageRef message, this actor will run
+       cabal2nix for that package to generate a nix specification,
+       sending back a CabalSpec describing the nix result or an Error
+       on failure.
+    """
+
     create_run = lambda self: self.createActor(RunCommand)
 
     def receiveMsg_GitRef(self, refmsg, sender):
@@ -293,6 +356,8 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         self.troupe_work_in_progress = False
         if isinstance(cmdres.command.tag, GitRef):
             refmsg = cmdres.command.tag
+            # Change the version reference in the nix output to the
+            # git branch name.
             self._postproc(refmsg.name, refmsg.branch, cmdres,
                            cmdres.command.requestor,
                            lambda l: '  version = "%s";' % refmsg.branch
@@ -313,7 +378,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
 
 
 class CabalPrefetched(object):
-    # Response message from CabalPrefetch
+    """The response message from a successful CabalPrefetch operation."""
     def __init__(self, name, reference, sha256, fetchspec=None):
         self.name = name
         self.reference = reference
@@ -326,6 +391,13 @@ class CabalPrefetched(object):
 
 @troupe()
 class CabalPrefetch(ActorTypeDispatcher, AutoCreate):
+    """Upon receipt of a GitRef or HackageRef message, this actor will
+       prefetch the referenced package into the local nix store and
+       return a CabalPrefetched message with the result information
+       (including the hash for the fetched source) or an Error
+       message.
+    """
+
     create_run = lambda self: self.createActor(RunCommand)
 
     def receiveMsg_GitRef(self, refmsg, sender):
@@ -382,9 +454,16 @@ class CabalPrefetch(ActorTypeDispatcher, AutoCreate):
         respmsg.tag = cmdres.command.tag
         self.send(cmdres.command.requestor, respmsg)
 
-# --------------------
+
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Nix expression evaluation
 
 class NixExprEval(ActorTypeDispatcher, AutoCreate):
+    """Evaluates an arbitrary nix expression passed as an input string
+       message, responding with a Success message containing the
+       stdout, or an Error message.
+    """
 
     create_run = lambda self: self.createActor(RunCommand)
 
@@ -404,6 +483,10 @@ class NixExprEval(ActorTypeDispatcher, AutoCreate):
 # --------------------
 
 class NixGHCCompilers(ActorTypeDispatcher):
+    """When a string message "get" is received, this will return a list of
+       strings, where each string is a valid compiler name in the
+       nixpkgs.haskell.compiler namespace.
+    """
     def receiveMsg_str(self, reqmsg, sender):
         if reqmsg != "get":
             self.send(sender, Error('Unknown request: ' + reqmsg))
@@ -462,18 +545,15 @@ class GetDepVers(ActorTypeDispatcher):
 
 # --------------------
 
-class WriteFile(ActorTypeDispatcher):
-    def receiveMsg_tuple(self, writemsg, sender):
-        tag, fname, flines = writemsg
-        with open(os.path.expandvars(
-                os.path.expanduser(fname)), 'w') as cabalfile:
-            cabalfile.writelines([l + '\n' for l in flines])
-        self.send(sender, Success( (tag, fname) ))
 
-# --------------------
-
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Nix file output generation
 
 class NixPackageSpec(object):
+    """Each nix package that should be included in the output will be
+       described by one of these messages.
+    """
     def __init__(self, package, nix_filename_or_prefetch_sha256):
         self.package = package  # PackageCommon
         self.package_name = package.name
@@ -483,6 +563,10 @@ class NixPackageSpec(object):
 
 
 class SummaryBase(ActorTypeDispatcher):
+    """Base class for the output generation.  This provides the common
+       functionality for collecting all of the NixPackageSpec messages
+       and driving the final output generation.
+    """
 
     def __init__(self, *args, **kw):
         super(SummaryBase, self).__init__(*args, **kw)
@@ -528,6 +612,21 @@ class SummaryBase(ActorTypeDispatcher):
         self._generate_summary_file_if_ready()
 
     def _generate_summary_file_if_ready(self):
+        # Determine if it is time to generate the summary file:
+        #
+        #   1. The summary output filename is known
+        #
+        #   2. No errors have been received (if so, pass this to the
+        #      original requestor).
+        #
+        #   3. The set of compilers is known
+        #
+        # Once the conditions above are met, an output file will be
+        # generated describing the nix packages for which a
+        # NixPackageSpec has been received; the assumption is that the
+        # summary filename will be sent only after all of the
+        # NixPackageSpecs have been sent.
+
         if not getattr(self, 'summary_fname', None):
             return # Don't know top-level requestor yet
 
@@ -543,18 +642,19 @@ class SummaryBase(ActorTypeDispatcher):
 
     def receiveMsg_Success(self, smsg, sender):
         # Gets called by the WriteFile Actor when writing our overlay
-        # file.
+        # file.  This is the final success point and the original
+        # requestor will be notified of completion.
         if isinstance(getattr(self, 'requestor', None), ActorAddress):
             self.send(self.requestor, smsg)        # -> file written to requestor
             self.send(sender, ActorExitRequest())  # -> WriteFile Actor
 
 
 class OverlaySpec(SummaryBase):
-
-    # Use to create ~/config/nixpkgs/overlay files, but these are
-    # either global, or if they are scoped, don't seem to properly
-    # exclude native versions, and cannot pass overrides as arguments.
-
+    """Creates ~/config/nixpkgs/overlay output files."""
+    # These are problematic because they are either global, or if they
+    # are scoped, don't seem to properly exclude native versions, and
+    # cannot pass overrides as arguments. This output style is
+    # currently deprecated.
 
     def _generate_summary_file(self):
         wf = self.createActor(WriteFile)
@@ -604,8 +704,11 @@ class OverlaySpec(SummaryBase):
 # --------------------
 
 class ProjectConfig(SummaryBase):
-
-    # Used to create a nix configuration file for that particular project
+    """Creates a nix project-level configuration file that can
+       completely describe all of the packages in that particular
+       project in the locations and versions specified in the vernix
+       input specification.
+    """
 
     def __init__(self, *args, **kw):
         super(ProjectConfig, self).__init__(*args, **kw)
@@ -795,9 +898,22 @@ class ProjectConfig(SummaryBase):
 
         ''' % locals() ]
 
-# --------------------
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Nix file output generation
+
 
 class ReadPackageSpec(ActorTypeDispatcher):
+    """When sent a string message containing the name of a package file,
+    this reads the vernix input specification and sends it back to the
+    requestor as an array of package specifications (StandardPackage
+    derivations).
+
+    Also sends a NixPackageSpec for each .nix file found in the
+    current directory.  This allows the repository containing the
+    vernix input package file to also contain .nix specifications for
+    packages that cannot be otherwise determined.
+    """
     def receiveMsg_str(self, package_file, sender):
         package_spec = eval(open(package_file, 'r').read())
         self.send(sender, package_spec)
@@ -811,6 +927,10 @@ class ReadPackageSpec(ActorTypeDispatcher):
 
 
 class GenerateNixInfo(ActorTypeDispatcher):
+    """The main actor coordinating the activities of all the other actors
+       in generating the desired vernix output from the input
+       specification.
+    """
 
     def receiveMsg_ActorAddress(self, addrmsg, sender):
         self.to_status_reporter = addrmsg
@@ -1000,6 +1120,8 @@ try:
     from progressive.tree import ProgressTree, Value, BarDescriptor
 
     class StatusReporter(object):
+        """Uses the blessings library to generate graphical progress bars for
+           each status area."""
         def __init__(self):
             self.t = Terminal()
             self.s = ProgressTree(term=self.t)
@@ -1028,6 +1150,8 @@ except ImportError:
     # blessings or progressive is not available
 
     class StatusReporter(object):
+        """This is a dummy status report object that prints simple output on
+           updates."""
         def __init__(self):
             self.status = {}
             self.total = 0
@@ -1044,6 +1168,10 @@ except ImportError:
             sys.stdout.flush()
 
 class SRep(ActorTypeDispatcher):
+    """An actor that receives ProgressStatus updates and displays them.
+    Used for the simple system base since the main application is
+    blocked while any actors are running.
+    """
     def receiveMsg_ProgressStatus(self, statusmsg, sender):
         if not hasattr(self, 'status'):
             self.status = StatusReporter()
@@ -1054,9 +1182,15 @@ class SRep(ActorTypeDispatcher):
             self.status.finished()
 
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Main (non-actor) functionality
 
 def gen_nix(noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
+    """Starts the actor processing for the input file and waits for the
+       final result, displaying any ProgressStatus messages received
+       in the interim.
+    """
     print('Generating nix specifications..')
     gni = asys.createActor(GenerateNixInfo)
     reporter = asys.createActor(SRep) if extern_reporter else None
