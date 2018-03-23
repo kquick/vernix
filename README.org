@@ -1,0 +1,118 @@
+* Vernix
+
+This is a tool to generate nix expressions for packages with specific versions.
+
+** Usage
+
+  1. Download the vernix file and make sure the executable bit is set.
+  2. Create a ~package_spec~ describing the override packages you
+     need.  Use ~$ vernix --help~ to get information on how to create
+     the ~package_spec~.
+  3. Run ~$ vernix~ to get a ~...-project.nix~ file.
+  4. Follow the instructions in the comments at the end of that project.nix file.
+  5. Optionally use additional arguments (e.g. ~--fast~).
+
+*** Notes
+
+The default project.nix file generated will automatically check the
+source locations each time a nix evaluation is performed
+(e.g. ~nix-shell~ or ~nix-build~) and therefore update to any recent
+changes for packages not pinned to a specific version.
+
+It is only necessary to re-run ~vernix~ if the ~package_spec~ input
+changes or to update for new upstream ~nixpkgs~ changes.
+
+
+** Background
+
+The nixpkgs set of tools and package descriptions are a great way to
+do controlled, reproducable development and product maintenance, but
+can be somewhat difficult to work with when developing a project,
+especially one made up of lots of dependent repositories (e.g. git
+submodules) and written in a language with its own package manager.
+
+At this stage (2018), nix has pretty good integration with various
+package managers which allows it to manage individual packages.
+
+What the nixpkg setup has historically not been good at is tracking
+version changes in a package.  A particular package references its
+dependencies by name only, with no version tag.  Only when there is an
+incompatibility with multiple necessary clients is there a specific
+version of a package created, and the version is embedded in the
+package name.
+
+** Problem Statement
+
+It should be possible to develop and/or install something with an
+explicit set of versioned dependencies.  The versioning of the
+dependencies may be controlled by a separate tool (cabal, cargo, pip,
+etc.), but it should be possible for nix to present the specific
+versions of those dependencies for the build.
+
+The primary use case for this is development, when a nix-shell is used
+to create the development environment.  It may be useful however to
+have this enabled for normal installations and even production
+packages: as the number of packages grows, it becomes increasingly
+likely that user-requested installs will have conflicting versions of
+package requirements that do not lend themselves easily to
+version-encoded name special cases.
+
+As another side effect, it should become easier to run different
+versions of the target language environment for testing (e.g. GHC 7.10
+v.s. 8.0.2 v.s. 8.2.2, or rust stable v.s. nightly).
+
+*** nixpkgs/overlays
+
+This is a nice way of creating specific sets of overlays and managing
+them separately.  Unfortunately, they are *all* applied for a
+particular nix operation, so different packages with conflicting
+version requirements will still have problems.
+
+This ultimately is not a good solution.  A better solution is one in
+which the dependencies tend toward the default installed versions, but
+which can be explicitly overloaded, but only for building that package
+and its dependency set.
+
+** Solution
+
+Build a specific foo-project.nix file which contains overlay
+specifications that are only applied when running that file.  All
+nix-shell operations will utilize that file to obtain the configuration.
+
+Create a tool to build that file as needed.
+
+The current primary language environment target is Haskell/cabal,
+although other language should be possible to support.
+
+** Notes regarding other Solutions
+
+*** stack
+
+This is a non-standard  tool, and Haskell-only.
+
+*** cabal new
+
+Based on the nix principles, and works fairly well for haskell
+packages, but does not extend to OS-level packages needed (e.g. zip).
+
+Also, this tool is still under development and is incomplete at this time.
+
+*** cabal2nix
+
+Good to translate cabal files to nix files, but all dependencies are
+specified without versioning, so there must be nix mappings to any
+specific versions required.
+
+*** Exiting nix infrastructure
+
+The haskell package infrastructure is missing a couple of key elements
+(e.g. cabal2nix subpath) and doesn't handle sub-versions too well.
+It's also not convenient when working with packages that are not part
+of the standard nixpkgs distribution (either local packages or
+packages newer than what has been incorporated into the distribution).
+
+*** git submodules
+
+Not useable outside of git.  Very complicated, with extra management
+needed.  Doesn't work for non-git modules.
+
