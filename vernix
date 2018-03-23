@@ -724,7 +724,10 @@ class ProjectConfig(SummaryBase):
         top_level_refs = [self._toplevel_ref(pkg)
                           for pkg in sorted(self.nixpackage_list)
                           if isinstance(pkg.package, HaskellPackage)]
-        sample_pkgname = self.nixpackage_list[0].package.name
+        sample_pkgname = ([p.package.name
+                           for p in self.nixpackage_list
+                           if p.package.name != project_name]
+                          + [ 'PACKAGE' ])[0]
         contents = (
             [ '{ nixpkgs ? <nixpkgs>',
               ', runtime ? "ghc822"',
@@ -762,7 +765,7 @@ class ProjectConfig(SummaryBase):
               '',
               '# Usage:',
               '#',
-              '#   For any of the primary packages defined above (e.g. %s),',
+              '#   For any of the primary packages defined above (e.g. %s),' % sample_pkgname,
               '#   one of the following can be done:',
               '#',
               '#   $ nix-build -A %s %s' % (sample_pkgname, project_fname),
@@ -784,6 +787,9 @@ class ProjectConfig(SummaryBase):
               '#   nix-shell$ ',
               '#          ... or:',
               '#   $ nix-shell --run "cabal build"',
+              '#',
+              '#   Note that any package specified will create an environment that',
+              '#   references that package and all of its dependencies.',
               '#',
             ])
         self.send(wf, ('summarygen', self.summary_fname, contents))
