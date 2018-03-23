@@ -412,7 +412,14 @@ class NixGHCCompilers(ActorTypeDispatcher):
         self.send(nixeval, 'with import <nixpkgs> {}; builtins.attrNames pkgs.haskell.compiler')
         self.requestor = sender
     def receiveMsg_Success(self, respmsg, sender):
-        self.send(self.requestor, eval(respmsg.data.decode('utf-8').replace('" "', '", "')))
+        if hasattr(respmsg.data, 'decode'):
+            try:
+                plainstr = respmsg.data.decode('utf-8')
+            except AttributError:
+                plainstr = respmsg.data
+        else:
+            plainstr = respmsg.data
+        self.send(self.requestor, eval(plainstr.replace('" "', '", "')))
         self.send(sender, ActorExitRequest())
     def receiveMsg_Error(self, errmsg, sender):
         self.send(self.requestor, errmsg)
