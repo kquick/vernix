@@ -1,7 +1,6 @@
 #! /usr/bin/env nix-shell
-#! nix-shell -i python3.6 -p cabal2nix nix-prefetch-scripts git haskell.compiler.ghc802 git 'python36.withPackages(pp: with pp; [ thespian setproctitle ])'
-
-# Use DeadLetterHandler for issues?
+# -*- mode: python; -*-
+#! nix-shell -i 'python3.6 -u' -p cabal2nix nix-prefetch-scripts git haskell.compiler.ghc802 git 'python36.withPackages(pp: with pp; [ thespian setproctitle blessings progressive ])'
 
 from thespian.actors import *
 from thespian.runcommand import *
