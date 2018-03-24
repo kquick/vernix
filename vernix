@@ -1210,7 +1210,8 @@ class SRep(ActorTypeDispatcher):
 # ----------------------------------------------------------------------
 # Main (non-actor) functionality
 
-def gen_nix(noisy=False, allowUnfree=False, frequency=None,
+def gen_nix(filename="package_spec",
+            noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
     """Starts the actor processing for the input file and waits for the
        final result, displaying any ProgressStatus messages received
@@ -1231,6 +1232,7 @@ def gen_nix(noisy=False, allowUnfree=False, frequency=None,
         asys.tell(gni, reporter)
     status = StatusReporter()
     resp = asys.tell(gni, ' '.join(['generate',
+                                    'filename:' + filename,
                                     'noisily' if noisy else '',
                                     'allowUnfree' if allowUnfree else '',
                                     frequency if frequency else '',
@@ -1337,7 +1339,10 @@ additional package set downloads and storage in the nix store.
 
     asys = ActorSystem(systemBase='multiprocTCPBase' if '--fast' in sys.argv else 'simpleSystemBase')
     try:
-        sys.exit(gen_nix('--noisy' in sys.argv, '--allowUnfree' in sys.argv,
+        sys.exit(gen_nix(filename=([arg for arg in sys.argv[1:] if arg[0] != '-']
+                                   + ['package_spec'])[0],
+                         noisy='--noisy' in sys.argv,
+                         allowUnfree='--allowUnfree' in sys.argv,
                          frequency=('hourly' if '--hourly' in sys.argv
                                     else ('daily' if '--daily' in sys.argv
                                           else 'weekly')),
