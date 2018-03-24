@@ -735,10 +735,10 @@ class ProjectConfig(SummaryBase):
         top_level_refs = [self._toplevel_ref(pkg)
                           for pkg in sorted(self.nixpackage_list)
                           if isinstance(pkg.package, HaskellPackage)]
-        sample_pkgname = ([p.package.name
-                           for p in self.nixpackage_list
-                           if p.package.name != project_name]
-                          + [ 'PACKAGE' ])[0]
+        sample_pkgname = sorted([p.package.name
+                                 for p in self.nixpackage_list
+                                 if p.package.name != project_name]
+                                + [ '{PACKAGE}' ])[0]
         contents = (
             [ '{ nixpkgs ? <nixpkgs>',
               ', runtime ? "ghc822"',
