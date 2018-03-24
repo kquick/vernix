@@ -583,6 +583,7 @@ class SummaryBase(ActorTypeDispatcher):
         super(SummaryBase, self).__init__(*args, **kw)
         self.nixpackage_list = []
         self.allowUnfree = False
+        self.static = False
         self.frequency = '%Y-w%W'
 
     def receiveMsg_NixPackageSpec(self, pkgmsg, sender):
@@ -614,6 +615,9 @@ class SummaryBase(ActorTypeDispatcher):
                 self.frequency = '%Y-w%W-d%u-h%H'
             elif strmsg == 'update:daily':
                 self.frequency = '%Y-w%W-d%u'
+            return
+        if strmsg == 'static':
+            self.static = True
             return
         # This is the filename to write, and is sent after all the
         # (Success) messages about individual packages.  Write out the
@@ -809,7 +813,14 @@ class ProjectConfig(SummaryBase):
         fmt = '     %s = %%s;' % pkg.package.name
         if not pkg.nix_source:
             callpkg = 'super.%s' % pkg.package.name
+        elif isinstance(pkg.nix_source, CabalSpec):
+            # CabalSpec ( .name, .version, .spec_lines )
+            callpkg = ('super.callPackage (\n' +
+                       '\n'.join([ '             ' + l for l in pkg.nix_source.spec_lines ]) +
+                       ') {}')
+
         else:
+            # CabalPrefetched ( .name, .reference, .sha256, .fetchspec )
             srcspec, shaspec = self._package_srcspec(pkg)
             subpath = ('"' + pkg.package.subpath + '"') \
                       if getattr(pkg.package, 'subpath', None) else 'null'
@@ -838,7 +849,7 @@ class ProjectConfig(SummaryBase):
 
     def constant_nixspec(self):
         dateStamp = datetime.now().strftime(self.frequency)
-        return ['''
+        always = '''
 
   cleanupSource =
     builtins.filterSource (path: type:
@@ -846,6 +857,11 @@ class ProjectConfig(SummaryBase):
         in type != "directory" ||
            !(builtins.elem nm ["dist" "dist-newstyle" ".git" "_darcs"]));
 
+        '''
+        if self.static:
+            return [ always ]
+        return [ always,
+                 '''
   # The following are slight modifications to the contents of
   # nixpkgs/pkgs/development/haskell-modules/make-package-set.nix to
   # allow explicit passing of sha256 and subdir.  The sha256 must be
@@ -962,41 +978,49 @@ class GenerateNixInfo(ActorTypeDispatcher):
 
     def receiveMsg_str(self, strmsg, sender):
         if 'generate' in strmsg:
+            input_fname = ([ w for w in strmsg.split() if w.startswith('filename:') ]
+                           + [ 'filename:package_spec'])[0].split(':')[1]
+            self.send(self.createActor(ReadPackageSpec), input_fname)
+
             self.noisy = 'noisily' in strmsg
             self.requestor = sender
             if not hasattr(self, 'to_status_reporter'):
                 self.to_status_reporter = sender
             self.status = ProgressStatus()
             self.nixfiles = {}  # Key::package name, V::None if pending, Error, LocalPackage, str nix filename, CabalPrefetched
-            self.send(self.createActor(ReadPackageSpec), 'package_spec')
+            static = 'static' in strmsg
 
-            # Use this to create local .nix files from cabal entries.
-            # Easy and direct, but they live outside of the nix store.
-            # self.c2nr = self.createActor(Cabal2Nix)
-            # gencabal = True
-
-            # Use this to prefetch packages and get the hash, and then
-            # construct a nix specification that performs the
-            # cabal2nix into a store location (providing common,
-            # referenced storage and avoids re-downloading each time).
-            self.c2nr = self.createActor(CabalPrefetch)
-            self.gencabal = False
+            if static:
+                # Use this to create local .nix files from cabal entries.
+                # Easy and direct, but they live outside of the nix store.
+                self.c2nr = self.createActor(Cabal2Nix)
+                self.gencabal = True
+            else:
+                # Use this to prefetch packages and get the hash, and then
+                # construct a nix specification that performs the
+                # cabal2nix into a store location (providing common,
+                # referenced storage and avoids re-downloading each time).
+                self.c2nr = self.createActor(CabalPrefetch)
+                self.gencabal = False
 
             self.wf = self.createActor(WriteFile)
 
-            # To generate an overlay specification
-            # self.summarygen = self.createActor(OverlaySpec)
-            # self.summary_fname = '$HOME/.config/nixpkgs/overlays/%s-overlay.nix'
-
-            # To generate a ProjectConfig specification
-            self.summarygen = self.createActor(ProjectConfig)
-            self.summary_fname = './%s-project.nix'
-            if 'allowUnfree' in strmsg:
-                self.send(self.summarygen, 'allowUnfree')
-            if 'hourly' in strmsg:
-                self.send(self.summarygen, 'update:hourly')
-            elif 'daily' in strmsg:
-                self.send(self.summarygen, 'update:daily')
+            if False:
+                # To generate an overlay specification
+                self.summarygen = self.createActor(OverlaySpec)
+                self.summary_fname = '$HOME/.config/nixpkgs/overlays/%s-overlay.nix'
+            else:
+                # To generate a ProjectConfig specification
+                self.summarygen = self.createActor(ProjectConfig)
+                self.summary_fname = './%s-project.nix'
+                if 'allowUnfree' in strmsg:
+                    self.send(self.summarygen, 'allowUnfree')
+                if 'hourly' in strmsg:
+                    self.send(self.summarygen, 'update:hourly')
+                elif 'daily' in strmsg:
+                    self.send(self.summarygen, 'update:daily')
+                if static:
+                    self.send(self.summarygen, 'static')
 
 
     def receiveMsg_list(self, package_spec, sender):
@@ -1082,6 +1106,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 self.send(self.summarygen, self.summary_fname % each.name)
                 self.status.add_pending()
         self.send(self.to_status_reporter, copy.deepcopy(self.status))
+
     def receiveMsg_GitRef(self, gitrefmsg, sender):
         self.status.done_pending()
         self.status.done_get_info()
@@ -1093,12 +1118,32 @@ class GenerateNixInfo(ActorTypeDispatcher):
     def receiveMsg_CabalSpec(self, cabalmsg, sender):
         self.status.done_pending()
         self.status.done_setup_local()
-        self.send(self.wf, (cabalmsg.name,
-                            cabalmsg.name +
-                            ('-' + cabalmsg.version if cabalmsg.version else '') + '.nix',
-                            cabalmsg.spec_lines))
-        self.status.add_pending()
         self.status.add_write_file()
+        if False:
+            # OLD method where nix files were generated locally; this
+            # was originally used for the deprecated overlay
+            # specification, but it also conflicts with the addition
+            # of local .nix files (which are supposed to be
+            # manually-created additions).
+            self.send(self.wf, (cabalmsg.name,
+                                cabalmsg.name +
+                                ('-' + cabalmsg.version if cabalmsg.version else '') + '.nix',
+                                cabalmsg.spec_lines))
+            self.status.add_pending()
+        else:
+            # NEW method where the cabal2nix output is reproduced
+            # directly inline into the output (project) file.  There
+            # is no resulting sharing of cabal2nix information between
+            # project files, but that was problematic if the projects
+            # used different versions of the package anyhow.
+            self.nixfiles[cabalmsg.name] = cabalmsg
+            for each in filter(lambda p:
+                               p.name == cabalmsg.name and
+                               isinstance(p, StandardPackage), self.package_spec):
+                self.send(self.summarygen, NixPackageSpec(each, cabalmsg))
+                self.status.done_write_file()
+            self._check_done()
+
     def receiveMsg_Success(self, smsg, sender):
         # Success response from either the Cabal2Nix (c2nr) or the
         # OverlaySpec (overlay) actors completion of writing their
@@ -1210,7 +1255,7 @@ class SRep(ActorTypeDispatcher):
 # ----------------------------------------------------------------------
 # Main (non-actor) functionality
 
-def gen_nix(filename="package_spec",
+def gen_nix(filename="package_spec", static=False,
             noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
     """Starts the actor processing for the input file and waits for the
@@ -1236,6 +1281,7 @@ def gen_nix(filename="package_spec",
                                     'noisily' if noisy else '',
                                     'allowUnfree' if allowUnfree else '',
                                     frequency if frequency else '',
+                                    'static' if static else '',
     ]))
     while True:
         resp = asys.listen(125)
@@ -1322,6 +1368,19 @@ logged/displayed.
 The --allowUnfree will allow corresponding sources in the generated
 project configuration.
 
+The --static flag will run cabal2nix as part of vernix and embed the
+build output into the resulting package file.  This is useful for
+subsequent use in a "restricted" environment (e.g. hydra) where
+running cabal2nix is not valid during a nix build.  By default, this
+flag is not expressed, and therefore the output project nix
+specification contains dynamic cabal2nix invocations.  The advantage
+to this is that any changes in the available input cabal files
+(e.g. local sources) will cause a re-evaluation of the corresponding
+nix requirements and therefore the build configuration is kept more
+current for a local development environment (although it is also
+slower to enter a nix-shell or nix-build since each cabal2nix is
+re-evaluated at that time).
+
 Additionally, any .nix files found in the same directory as the
 package_spec will automatically be added as package override
 specifications.
@@ -1343,6 +1402,7 @@ additional package set downloads and storage in the nix store.
                                    + ['package_spec'])[0],
                          noisy='--noisy' in sys.argv,
                          allowUnfree='--allowUnfree' in sys.argv,
+                         static='--static' in sys.argv,
                          frequency=('hourly' if '--hourly' in sys.argv
                                     else ('daily' if '--daily' in sys.argv
                                           else 'weekly')),
