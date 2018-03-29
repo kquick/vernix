@@ -23,7 +23,7 @@ from datetime import datetime
 
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
-# Messages that can be passed
+# Objects that can be declared in the input package_spec  [INPUT]
 
 class Project(object):
     def __init__(self, name):
@@ -121,6 +121,10 @@ class LocalPackage(HaskellPackage):
     def __str__(self):
         return self.localdir + ' directory'
 
+
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Messages that can be passed
 
 class Error(object):
     def __init__(self, msg, attempting):
@@ -1335,9 +1339,11 @@ specification:
                     <all other Package arguments>)
         LocalPackage("name", "path")
 
-There should only be one Project, which helps specify the output file.  A package
-is obtained from Hackage, a RepoPackage is obtained from a github (or similar) repo,
-and a LocalPackage is obtained from a local directory.
+There should only be one Project, which helps specify the output file.
+A package is obtained from Hackage, a RepoPackage is obtained from a
+github (or similar) repo, and a LocalPackage is obtained from a local
+directory.  For more details, see the "[INPUT]" section in the source
+above.
 
     Note: to avoid repeated queries for git credentials, use either
           the git credential helper cache (with http repo
