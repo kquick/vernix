@@ -523,36 +523,39 @@ class NixGHCCompilers(ActorTypeDispatcher):
 
 # --------------------
 
-@troupe
-class NixHaskellPackageVer(ActorTypeDispatcher):
-    # Determines the version of the specified package currently available in nixpkgs
-    def receiveMsg_str(self, reqmsg, sender):  # name of package
-        if not getattr(self, 'nixeval', None):
-            nixeval = self.createActor(NixExprEval)
-        self.send(nixeval, '(import <nixpkgs> {}).pkgs.haskellPackages.%s.version')
-        self.requestor = sender
-        self.troupe_work_in_progress = True
-    def receiveMsg_Success(self, respmsg, sender):
-        self.troupe_work_in_progress = False
-        self.send(self.requestor, respmsg.data.decode('utf-8').replace('"',''))
-    def receiveMsg_Error(self, errmsg, sender):
-        self.send(self.requestor, errmsg)
-        self.send(sender, ActorExitRequest())
+# KWQ:  could it be trained to read .gitmodules as well?
+
+# @troupe
+# class NixHaskellPackageVer(ActorTypeDispatcher):
+#     """Determines the version of the specified package currently available
+#        in nixpkgs."""
+#     def receiveMsg_str(self, reqmsg, sender):  # name of package
+#         if not getattr(self, 'nixeval', None):
+#             nixeval = self.createActor(NixExprEval)
+#         self.send(nixeval, '(import <nixpkgs> {}).pkgs.haskellPackages.%s.version')
+#         self.requestor = sender
+#         self.troupe_work_in_progress = True
+#     def receiveMsg_Success(self, respmsg, sender):
+#         self.troupe_work_in_progress = False
+#         self.send(self.requestor, respmsg.data.decode('utf-8').replace('"',''))
+#     def receiveMsg_Error(self, errmsg, sender):
+#         self.send(self.requestor, errmsg)
+#         self.send(sender, ActorExitRequest())
 
 # --------------------
 
-class GetDepVers(ActorTypeDispatcher):
-    # Reads the cabal.config output by "$ cabal freeze" to get the
-    # dependendies and constraints
-    def receiveMsg_str(self, reqmsg, sender):  # directory for cabal.config file
-        with open(os.path.join(reqmsg, 'cabal.config'), 'r') as ccf:
-            deps = ccf.read()
-        deplist = [d.strip()
-                   for d in deps.replace('constraints:', ' ').split('\n')]
-        self.send(sender,
-                  [ Package(dep.split()[0], dep.split()[1][2:-1])
-                    for dep in deplist  # each: "package ==v.e.r,"
-                  ])
+# class GetDepVers(ActorTypeDispatcher):
+#     # Reads the cabal.config output by "$ cabal freeze" to get the
+#     # dependendies and constraints
+#     def receiveMsg_str(self, reqmsg, sender):  # directory for cabal.config file
+#         with open(os.path.join(reqmsg, 'cabal.config'), 'r') as ccf:
+#             deps = ccf.read()
+#         deplist = [d.strip()
+#                    for d in deps.replace('constraints:', ' ').split('\n')]
+#         self.send(sender,
+#                   [ Package(dep.split()[0], dep.split()[1][2:-1])
+#                     for dep in deplist  # each: "package ==v.e.r,"
+#                   ])
 
 # --------------------
 
