@@ -20,34 +20,86 @@ import copy
 import glob
 from datetime import datetime
 
+class Settable(object):
+    def __call__(self, **kw):
+        for each in kw:
+            if hasattr(self, each):
+                setattr(self, each, kw[each])
+            else:
+                raise NameError('Attribute %s cannot be set on %s'
+                                ': it is not already present' % (self, each))
+        return self
 
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
 # Objects that can be declared in the input package_spec  [INPUT]
 
 class Project(object):
+    "Specifies the name of the project being declared"
     def __init__(self, name):
         self.name = name
 
-class RepoIdent(object):
-    def __init__(self, reposerver, team, repo):
+class Base_Location(object): pass
+
+class RepoIdent(Base_Location, Settable):
+    "Specifies the Source Code Repository coordinates for this package"
+    def __init__(self, reposerver='https://github.com',
+                 team=None, reponame=None, subpath=None):
+        super(RepoIdent, self).__init__()
         self.reposerver = reposerver
         self.team = team
-        self.repo = repo
+        self.reponame = reponame
+        self.subpath = subpath
+        self.sep1 = ':' if self.reposerver.startswith('git@') else '/'
+    @property
+    def source_loc(self):
+        return '%(reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
+
+class Local(Base_Location):
+    "Specifies a local directory for this package's source"
+    def __init__(self, localpath):
+        self.localpath = localpath
+    @property
+    def source_loc(self):
+        return self.localpath
+    def __str__(self):
+        return self.localpath + ' directory'
 
 
-class PackageIdent(object):
+class Base_PackageIdent(object):
     def __init__(self, name, version=None):
         self.name = name
         self.version = version
 
-class StandardPackage(PackageIdent): pass
+class StandardPackage(Base_PackageIdent):
+    def __init__(self, name, version=None, *args):
+        super(StandardPackage, self).__init__(name, version)
+        self.repo_location = None
+        self.local_location = None
+        self._process_args(*args)
+    def _process_args(self, *args):
+        for arg in args:
+            if isinstance(arg, RepoIdent):
+                self.repo_location = arg if arg.reponame else arg(reponame = self.name)
+            elif isinstance(arg, Local):
+                self.local_location = arg
+            elif callable(arg):
+                self._process_args(arg(self.name))
+            elif isinstance(arg, str) and not self.version:
+                self.version = arg
+            else:
+                raise ValueError('Unrecognized Package argument: %s %s'
+                                 % (arg, str(type(arg))))
+    def origin_info(self):
+        return str(self.local_location or self.repo_location or self.package_suppliers())
+
 
 class HaskellPackage(StandardPackage):
-    def __init__(self, name, version=None, dontCheck=False,
+    "Specify a Haskell package"
+    def __init__(self, name, *args, version=None, dontCheck=False,
                  jailBreak=False, dontHaddock=False,
                  extraLibraries=None):
-        super(HaskellPackage, self).__init__(name, version)
+        super(HaskellPackage, self).__init__(name, version, *args)
         self.dontCheck = dontCheck
         self.jailBreak = jailBreak
         self.dontHaddock = dontHaddock
@@ -76,50 +128,10 @@ class HaskellPackage(StandardPackage):
     def with_wrappers(self, callstr):
         return self._extralibwrap(self._jbwrap(self._dcwrap(self._haddockwrap(callstr))))
 
-
-class RepoPatch(RepoIdent, PackageIdent):
-    def __init__(self, name, version, team, reposerver='https://github.com'):
-        RepoIdent.__init__(self, reposerver, team, name)
-        PackageIdent.__init__(self, name, version)
-
-class RepoPackage(HaskellPackage):
-    def __init__(self, name, team='awesome',
-                 version='master',
-                 reponame=None,
-                 subpath=None,
-                 reposerver='https://github.com', **kw):
-        super(RepoPackage, self).__init__(name=name, version=version, **kw)
-        self.team = team
-        self.reposerver = reposerver
-        self.reponame = reponame or name
-        self.subpath = subpath
-        self.sep1 = ':' if self.reposerver.startswith('git@') else '/'
-
-    @property
-    def source_loc(self):
-        return '%(reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
-
-
-class Package(HaskellPackage):
-    @property
-    def source_loc(self):
+    def package_suppliers(self):
         if self.version:
             return 'cabal://%s-%s' % (self.name, self.version)
-
-class LocalPackage(HaskellPackage):
-    def __init__(self, name, localdir, dontCheck=False, dontHaddock=False,
-                 extraLibraries=None):
-        super(LocalPackage, self).__init__(name, 'lcldev',
-                                           dontCheck=dontCheck,
-                                           dontHaddock=dontHaddock,
-                                           extraLibraries=extraLibraries,
-        )
-        self.localdir = localdir
-    @property
-    def source_loc(self):
-        return self.localdir
-    def __str__(self):
-        return self.localdir + ' directory'
+        return 'cabal://%s' % (self.name, self.version)
 
 
 # ----------------------------------------------------------------------
@@ -235,31 +247,39 @@ class WriteFile(ActorTypeDispatcher):
 class GitRef(object):
     """Reference to a specific git patch."""
     def __init__(self, name, branch, ref, reporef, subpath=None):
-        self.name = name        # The name from the input RepoPackage
-        self.reporef = reporef  # The repository reference (url + repo name)
-        self.branch = branch    # The version from the input RepoPackage
-        self.ref = ref          # The patch reference within the repository  KWQ: patchref
-        self.subpath = subpath  # the subpath in the repo where this package lives (from RepoPackage)
+        self.name = name        # The name from the input RepoIdent
+        self.reporef = reporef  # The repository reference (url + team + reponame)
+        self.branch = branch    # The input version from the RepoIdent
+        self.ref = ref          # The patch reference obtained from the repository
+        self.subpath = subpath  # the subpath in the repo where this package lives (from RepoIdent)
 
 
-#@troupe()
-# n.b. this is not run as a troupe because it has the
-# potential to cause a getpassword query, and multiple of these
-# password queries cannot be entertained simultaneously.
-
+@troupe()
 class GitBranchRef(ActorTypeDispatcher):
-    """Given a RepoPackage message, which has a git reference (a branch
-       name, a tag, or a revision hash), determine the specific git
-       patch being referenced and return a GitRef object which
-       describes that specific git patch.
+    """Given a StandardPackage message with a repo_location, which has a
+       git reference (a branch name, a tag, or a revision hash),
+       determine the specific git patch being referenced and return a
+       GitRef object which describes that specific git patch.
     """
-    def receiveMsg_RepoPackage(self, repomsg, sender):
+    # n.b. if the current process does not have a gpg-agent,
+    # ssh-agent, or git-credential helper running, this has the
+    # potential to prompt for a username and password.  This will
+    # generally only be successful if not run with "--fast" (i.e. it
+    # is only successful for a simpleSystemBase where Actors are
+    # single-threaded and still maintain TTY access via stdin/stdout);
+    # even an X-windows DISPLAY variable is usually ineffective
+    # because only one x-getpass can be run at any time.
+    def receiveMsg_StandardPackage(self, pkgmsg, sender):
         run = self.createActor(RunCommand)
-        cmd = Command('git', ['ls-remote', repomsg.source_loc],
-                      logger=None if getattr(repomsg, 'noisily', False) else False,
+        if not pkgmsg.repo_location:
+            self.send(sender, Error((pkgmsg.name, "no repo location specified"),
+                                    'GitBranchRef pkg request'))
+            return
+        cmd = Command('git', ['ls-remote', pkgmsg.repo_location.source_loc],
+                      logger=None if getattr(pkgmsg, 'noisily', False) else False,
                       logtag='git:ls-remote',
-                      error_ok=not getattr(repomsg, 'noisily', False))
-        cmd.reqmsg = repomsg
+                      error_ok=not getattr(pkgmsg, 'noisily', False))
+        cmd.reqmsg = pkgmsg
         self.send(run, cmd)
         self.requestor = sender
         self.troupe_work_in_progress = True
@@ -272,10 +292,9 @@ class GitBranchRef(ActorTypeDispatcher):
             return
         lines = cmdres.stdout.split('\n')
         name = cmdres.command.reqmsg.name
-        repo = cmdres.command.reqmsg.reposerver + '/' + cmdres.command.reqmsg.team
-        branch = cmdres.command.reqmsg.version
+        branch = cmdres.command.reqmsg.version or 'master'
         match = list(filter(lambda l: l and l[-(len(branch)+1):] == '/' + branch, lines))
-        reporef = cmdres.command.reqmsg.source_loc
+        reporef = cmdres.command.reqmsg.repo_location.source_loc
         if len(match) == 0:
             # This does not match a branch name.  If all characters
             # are hex chars, it may simply be a sha reference which
@@ -284,39 +303,43 @@ class GitBranchRef(ActorTypeDispatcher):
             if set(branch) - set('0123456789abcdef'):
                 self.send(self.requestor, Error((name,
                                                  'No match for branch %s in repo %s' %
-                                                 (branch, repo)),
+                                                 (branch, reporef)),
                                                 'GitBranchRef no matches'))
             else:
                 self.send(self.requestor, GitRef(name=name, branch=branch, ref=branch,
                                                  reporef=reporef,
-                                                 subpath=cmdres.command.reqmsg.subpath))
+                                                 subpath=cmdres.command.reqmsg.repo_location.subpath))
         elif len(match) > 1:
             self.send(self.requestor,
                       Error((name,
                             'Multiple matches for branch %s in repo %s: %s' %
-                             (branch, repo, match)),
+                             (branch, reporef, match)),
                             'GitBranchRef multiple matches'))
         else:
             self.send(self.requestor, GitRef(name=name, branch=branch, ref=match[0].split('\t')[0],
                                              reporef=reporef,
-                                             subpath=cmdres.command.reqmsg.subpath))
+                                             subpath=cmdres.command.reqmsg.repo_location.subpath))
 
     # def receiveUnrecognizedMessage(self, msg, sender):
     #     logging.critical('GBR: GOT UNREC FROM %s: %s', sender, msg)
 
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
-# Cabal information
+# Haskell package handling and Cabal information
 
 
 class CabalSpec(object):
     """The nix specification for a specific cabal package as obtained from
        cabal2nix
     """
-    def __init__(self, name, version, lines):
+    def __init__(self, name, version, lines, src_loc):
         self.name = name
         self.version = version
         self.spec_lines = lines
+        self.src_loc = src_loc
+
+    def origin_info(self):
+        return ' '.join(filter(None, [self.version, self.src_loc]))
 
 
 class HackageRef(object):
@@ -331,16 +354,25 @@ class HackageRef(object):
 # many cabal2nix in parallel will cause them to busywait/deadlock and
 # the operations will time out.  This seems to be a limitation of
 # cabal2nix and/or nix itself.
-@troupe(max_count=2)
+@troupe(max_count=4)
 class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
-    """Upon receipt of a GitRef or HackageRef message, this actor will run
-       cabal2nix for that package to generate a nix specification,
-       sending back a CabalSpec describing the nix result or an Error
-       on failure.
+    """Upon receipt of a GitRef, HackageRef, or Local message, this actor
+       will run cabal2nix for that package to generate a nix
+       specification, sending back a CabalSpec describing the nix
+       result or an Error on failure.
+
     """
 
     create_run = lambda self: self.createActor(RunCommand)
 
+    def receiveMsg_Local(self, localmsg, sender):
+        cmd = Command('cabal2nix', [localmsg.localpath],
+                      logger=None if getattr(localmsg, 'noisily', False) else False,
+                      logtag='cabal2nix:local',
+                      error_ok=not getattr(localmsg, 'noisily', False))
+        cmd.tag = localmsg
+        cmd.src = localmsg.localpath
+        self.do_run(cmd, sender)
     def receiveMsg_GitRef(self, refmsg, sender):
         args = ['--revision', refmsg.ref]
         if refmsg.subpath:
@@ -350,6 +382,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                       logtag='cabal2nix:git',
                       error_ok=not getattr(refmsg, 'noisily', False))
         cmd.tag = refmsg
+        cmd.src = refmsg.reporef + ' ' + refmsg.ref
         self.do_run(cmd, sender)
     def receiveMsg_HackageRef(self, hackagemsg, sender):
         cmd = Command('cabal2nix',
@@ -359,6 +392,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                       logtag='cabal2nix:hackage',
                       error_ok=not hackagemsg.noisily)
         cmd.tag = hackagemsg
+        cmd.src = 'hackage '
         self.do_run(cmd, sender)
     def do_run(self, cmd, sender):
         cmd.requestor = sender
@@ -366,11 +400,17 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         self.troupe_work_in_progress = True
     def receiveMsg_CommandResult(self, cmdres, sender):
         self.troupe_work_in_progress = False
-        if isinstance(cmdres.command.tag, GitRef):
+        if isinstance(cmdres.command.tag, Local):
+            localmsg = cmdres.command.tag
+            self._postproc(localmsg.pkgname, None, cmdres,
+                           cmdres.command.src,
+                           cmdres.command.requestor)
+        elif isinstance(cmdres.command.tag, GitRef):
             refmsg = cmdres.command.tag
             # Change the version reference in the nix output to the
             # git branch name.
             self._postproc(refmsg.name, refmsg.branch, cmdres,
+                           cmdres.command.src,
                            cmdres.command.requestor,
                            lambda l: '  version = "%s";' % refmsg.branch
                            if l and (l.strip().startswith('version =') or
@@ -379,14 +419,15 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         else:
             hackagemsg = cmdres.command.tag
             self._postproc(hackagemsg.pkgname, hackagemsg.pkgver, cmdres,
+                           cmdres.command.src,
                            cmdres.command.requestor)
-    def _postproc(self, name, version, cmdres, sender, line_op=None):
+    def _postproc(self, name, version, cmdres, src_info, sender, line_op=None):
         if cmdres.exitcode:
             self.send(sender, Error((name, cmdres.errorstr), 'Cabal2Nix'))
             return
         lines = [line_op(l) if line_op else
                  l for l in cmdres.stdout.split('\n')]
-        self.send(sender, CabalSpec(name, version, lines))
+        self.send(sender, CabalSpec(name, version, lines, src_info))
 
 
 class CabalPrefetched(object):
@@ -396,9 +437,9 @@ class CabalPrefetched(object):
         self.reference = reference
         self.sha256 = sha256
         self.fetchspec = fetchspec
-    def __str__(self):
+    def origin_info(self):
         self.shamsg = "sha256=" + self.sha256 if self.sha256 else ""
-        return '[nix-prefetch]%(name)s-%(reference)s %(shamsg)s' % self.__dict__
+        return '[nix-prefetch]%(name)s-%(reference)s' % self.__dict__
 
 
 @troupe()
@@ -557,7 +598,7 @@ class NixGHCCompilers(ActorTypeDispatcher):
 #         deplist = [d.strip()
 #                    for d in deps.replace('constraints:', ' ').split('\n')]
 #         self.send(sender,
-#                   [ Package(dep.split()[0], dep.split()[1][2:-1])
+#                   [ HaskellPackage(dep.split()[0], dep.split()[1][2:-1])
 #                     for dep in deplist  # each: "package ==v.e.r,"
 #                   ])
 
@@ -573,7 +614,7 @@ class NixPackageSpec(object):
        described by one of these messages.
     """
     def __init__(self, package, nix_filename_or_prefetch_sha256):
-        self.package = package  # PackageCommon
+        self.package = package  # StandardPackage
         self.package_name = package.name
         self.nix_source = nix_filename_or_prefetch_sha256
     def __lt__(self, o):
@@ -592,25 +633,34 @@ class SummaryBase(ActorTypeDispatcher):
         self.allowUnfree = False
         self.static = False
         self.frequency = '%Y-w%W'
+        self.mixins = {}
 
     def receiveMsg_NixPackageSpec(self, pkgmsg, sender):
         # Gets called for each nix file written.  Keep a list of the
         # packages, and also get the list of compilers if it hasn't
         # been requested yet.
         self.nixpackage_list.append(pkgmsg)
-        if not hasattr(self, 'compilers'):
-            self.compilers = self.createActor(NixGHCCompilers)
-            self.send(self.compilers, 'get')
+        self.call_mixin("extra_prep", pkgmsg.__class__.__name__, (pkgmsg,))
+
+    def call_mixin(self, mixin_op, mixin_kind, args=None):
+        mixin_method = mixin_op + "_" + mixin_kind
+        mixin = self.mixins.get(mixin_kind, None)
+        if mixin and hasattr(mixin, mixin_method):
+            return getattr(mixin, mixin_method)(*((args or tuple())))
+            # getattr(mixin, mixin_method)(*((mixin,) + (args or tuple())))
+
+    def mixin_kinds(self):
+        return self.mixins.keys()
 
     def receiveMsg_list(self, listmsg, sender):
         # Response from the NixGHCCompilers Actor request
-        if sender == self.compilers:
-            self.send(self.compilers, ActorExitRequest())
-            self.compilers = listmsg
+        if sender == getattr(self, '_haskell_compilers', None):
+            self.send(sender, ActorExitRequest())
+            self._haskell_compilers = listmsg
             self._generate_summary_file_if_ready()
 
     def receiveMsg_Error(self, errormsg, sender):
-        self.compiler_error = errormsg
+        self.summary_error = errormsg
         self._generate_summary_file_if_ready()
 
     def receiveMsg_str(self, strmsg, sender):
@@ -652,7 +702,7 @@ class SummaryBase(ActorTypeDispatcher):
         if not getattr(self, 'summary_fname', None):
             return # Don't know top-level requestor yet
 
-        err = getattr(self, 'compiler_error', None)
+        err = getattr(self, 'summary_error', None)
         if err:
             self.send(self.requestor, err)
             return
@@ -670,6 +720,8 @@ class SummaryBase(ActorTypeDispatcher):
             self.send(self.requestor, smsg)        # -> file written to requestor
             self.send(sender, ActorExitRequest())  # -> WriteFile Actor
 
+
+# --------------------
 
 class OverlaySpec(SummaryBase):
     """Creates ~/config/nixpkgs/overlay output files."""
@@ -725,112 +777,69 @@ class OverlaySpec(SummaryBase):
 
 # --------------------
 
-class ProjectConfig(SummaryBase):
-    """Creates a nix project-level configuration file that can
-       completely describe all of the packages in that particular
-       project in the locations and versions specified in the vernix
-       input specification.
-    """
+class StandardPackage_MixIn(object):
 
-    def __init__(self, *args, **kw):
-        super(ProjectConfig, self).__init__(*args, **kw)
-        self.compilers = 'not needed'
+    def package_overrides_StandardPackage(self, package_list):
+        pkgdef = lambda p: '      %s = p.callPackage %s {};' % (p.package.name, p.nix_source)
+        return map(pkgdef, sorted(package_list))
 
-    def _generate_summary_file(self):
-        wf = self.createActor(WriteFile)
-        project_fname = os.path.basename(self.summary_fname)
-        project_name = os.path.splitext(project_fname)[0]
-        package_refs = [self._package_ref(pkg)
-                        for pkg in sorted(self.nixpackage_list)
-                        if isinstance(pkg.package, HaskellPackage)]
-        top_level_refs = [self._toplevel_ref(pkg)
-                          for pkg in sorted(self.nixpackage_list)
-                          if isinstance(pkg.package, HaskellPackage)]
-        sample_pkgname = sorted([p.package.name
-                                 for p in self.nixpackage_list
-                                 if p.package.name != project_name]
-                                + [ '{PACKAGE}' ])[0]
-        contents = (
-            [ '{ nixpkgs ? <nixpkgs>',
-              ', runtime ? "ghc822"',
-              '}:',
-              'let',
-              '  config = {',
-              '    allowUnfree = true;' if self.allowUnfree else '',
-              '    packageOverrides = p: with p.haskell.lib; {',
-              '      haskell = p.haskell // {',
+    def package_ref_StandardPackage(self, package):
+        return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
+
+    def kind_definitions_StandardPackage(self, is_static, frequency):
+        for each in [
+            '  cleanupSource =',
+            '    builtins.filterSource (path: type:',
+            '      let nm = baseNameOf path;',
+            '        in type != "directory" ||',
+            '           !(builtins.elem nm ["dist" "dist-newstyle" ".git" "_darcs"]));',
+        ]:
+            yield each
+
+
+class HaskellPackage_MixIn(object):
+
+    def extra_prep_HaskellPackage(self, pkgmsg):
+        if not hasattr(self, '_haskell_compilers'):
+            self._haskell_compilers = self.createActor(NixGHCCompilers)
+            self.send(self._haskell_compilers, 'get')
+
+    def package_ref_HaskellPackage(self, package):
+        return '    %(package_name)s = pkgs.haskell.packages.${runtime}.%(package_name)s;' \
+            % package.__dict__
+
+    def package_overrides_HaskellPackage(self, package_list):
+        package_defs = [ self._package_def_HaskellPackage_(pkg)
+                         for pkg in sorted(package_list) ]
+        return (
+            [ '      haskell = p.haskell // {',
               '        packages = p.haskell.packages // {',
               '          ${runtime} = p.haskell.packages.${runtime}.override {',
-              '            overrides = self: super: {',
-              ] + package_refs +
-            [ '            };',
-              '          };',
-              '        };',
-              '      };',
-              ] +
-            [  '     %s = super.callPackage %s {};' % (pkg.package.name, pkg.nix_source)
-               for pkg in self.nixpackage_list
-               if not isinstance(pkg.package, HaskellPackage) ] +
-            [ '    };',
-              '  };',
-              '',
-              '  pkgs = import nixpkgs { inherit config; };',
-              '',
-              '  inherit (pkgs.haskell.lib) dontCheck doJailbreak overrideCabal;',
-              '',
-              ] + self.constant_nixspec() +
-            [ '',
-              'in',
-              '  {',
-              ] + top_level_refs +
-            [ '  }',
-              '',
-              '# Usage:',
-              '#',
-              '#   For any of the primary packages defined above (e.g. %s),' % sample_pkgname,
-              '#   one of the following can be done:',
-              '#',
-              '#   $ nix-build -A %s %s' % (sample_pkgname, project_fname),
-              '#     <generates "result" link in local directory>',
-              '#',
-              '#   $ nix-build -A %s.env %s' % (sample_pkgname, project_fname),
-              '#   nix-shell$ <dev environment for "cabal build">',
-              '#',
-              '#   $ git clone %s' % sample_pkgname,
-              '#   $ cd %s' % sample_pkgname,
-              '#   $ cat > shell.nix << EOF',
-              '#   { runtime ? "ghc802" }:',
-              '#   (import %s { inherit runtime; }).%s.env' % (
-                  os.path.join(os.getcwd(), project_fname), sample_pkgname),
-              '#   EOF',
-              '#   $',
-              '#          ... and then simply:',
-              '#   $ nix-shell',
-              '#   nix-shell$ ',
-              '#          ... or:',
-              '#   $ nix-shell --run "cabal build"',
-              '#',
-              '#   Note that any package specified will create an environment that',
-              '#   references that package and all of its dependencies.',
-              '#',
+              '            overrides = self: super: with p.haskell.lib; {',
+            ] + package_defs + [
+                '            };',
+                '          };',
+                '        };',
+                '      };',
             ])
-        self.send(wf, ('summarygen', self.summary_fname, contents))
 
-    def _package_ref(self, pkg):
-        fmt = '     %s = %%s;' % pkg.package.name
+    def _package_def_HaskellPackage_(self, pkg):
+        fmt = '               %s = %%s;' % pkg.package.name
         if not pkg.nix_source:
             callpkg = 'super.%s' % pkg.package.name
         elif isinstance(pkg.nix_source, CabalSpec):
             # CabalSpec ( .name, .version, .spec_lines )
             callpkg = ('super.callPackage (\n' +
-                       '\n'.join([ '             ' + l for l in pkg.nix_source.spec_lines ]) +
+                       '\n'.join([ '                 ' + l for l in pkg.nix_source.spec_lines ]) +
                        ') {}')
 
         else:
             # CabalPrefetched ( .name, .reference, .sha256, .fetchspec )
             srcspec, shaspec = self._package_srcspec(pkg)
-            subpath = ('"' + pkg.package.subpath + '"') \
-                      if getattr(pkg.package, 'subpath', None) else 'null'
+            subpath = ('"' + pkg.package.repo_location.subpath + '"') \
+                      if not getattr(pkg.package, 'local_location', False) and \
+                         getattr(pkg.package, 'repo_location', None) and \
+                         getattr(pkg.package.repo_location, 'subpath', None) else 'null'
             callpkg = 'callCabal2nixSubdir "%(package_name)s" %(source_loc)s %(subpath)s %(sha256)s {}' % \
                       { 'hpath': 'pkgs.haskell.packages.${runtime}',
                         'package_name': pkg.package.name,
@@ -843,31 +852,17 @@ class ProjectConfig(SummaryBase):
 
     def _package_srcspec(self, pkg):
         if getattr(pkg.nix_source, 'sha256', None):
-            return (pkg.package.source_loc, '"' + pkg.nix_source.sha256 + '"')
+            # This is a non-repo, non-local, standard package reference
+            return (pkg.package.package_suppliers(), '"' + pkg.nix_source.sha256 + '"')
         if getattr(pkg.nix_source, 'fetchspec', None):
             return ('(p.%s)' % pkg.nix_source.fetchspec, 'null')
         # This is a local directory.  Exclude build output paths to ensure a clean build.
         clean_local_source = lambda s: '(cleanupSource %s)' % s
         return (clean_local_source(pkg.nix_source), 'null')
 
-    def _toplevel_ref(self, pkg):
-        fmt = '    %(package_name)s = pkgs.haskell.packages.${runtime}.%(package_name)s;'
-        return fmt % pkg.__dict__
-
-    def constant_nixspec(self):
-        dateStamp = datetime.now().strftime(self.frequency)
-        always = '''
-
-  cleanupSource =
-    builtins.filterSource (path: type:
-      let nm = baseNameOf path;
-        in type != "directory" ||
-           !(builtins.elem nm ["dist" "dist-newstyle" ".git" "_darcs"]));
-
-        '''
-        if self.static:
-            return [ always ]
-        return [ always,
+    def kind_definitions_HaskellPackage(self, is_static, frequency):
+        if not is_static:
+            for each in [
                  '''
   # The following are slight modifications to the contents of
   # nixpkgs/pkgs/development/haskell-modules/make-package-set.nix to
@@ -939,12 +934,127 @@ class ProjectConfig(SummaryBase):
         # `builtins.filterSource` works on. But this filtering isn't
         # usually important on other kinds of sources, like
         # `fetchFromGitHub`.
-        overrideCabal (self.callPackage (haskellSrc2nix {
+        pkgs.haskell.lib.overrideCabal (self.callPackage (haskellSrc2nix {
           inherit name subdir sha256;
           src = builtins.filterSource (path: type: pkgs.lib.hasSuffix ".cabal" path) src;
         }) args) (_: { inherit src; });
+                 ''' % { 'dateStamp' : datetime.now().strftime(frequency) }
+            ]:
+                yield each
 
-        ''' % locals() ]
+
+
+class ProjectConfig(SummaryBase):
+    """Creates a nix project-level configuration file that can
+       completely describe all of the packages in that particular
+       project in the locations and versions specified in the vernix
+       input specification.
+    """
+
+    def __init__(self, *args, **kw):
+        super(ProjectConfig, self).__init__(*args, **kw)
+        self.compilers = 'not needed'
+        self.mixins = { 'HaskellPackage': HaskellPackage_MixIn(),
+                        'StandardPackage': StandardPackage_MixIn(),
+        }
+
+    def _generate_summary_data(self, project_fname, sample_pkgname, pkg_dict):
+        for each in [ '{ nixpkgs ? <nixpkgs>',
+                      ', runtime ? "ghc822"',
+                      '}:',
+                      '',
+                      'let',
+                      '',
+                      '  pkgs = import nixpkgs { inherit config; };',
+                      '',
+                      '  config = {',
+                      '    allowUnfree = true;' if self.allowUnfree else '',
+                      '    packageOverrides = p: {',
+        ]:
+            yield each
+        for kind in pkg_dict:
+            yield ''
+            yield '      # %s packages' % kind
+            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind],)):
+                yield line
+        for each in [ '    };',
+                      '  };',
+                      '',
+                      # '  pkgs = import nixpkgs { inherit config; };',
+                      # '',
+                      # '  inherit (pkgs.haskell.lib) dontCheck doJailbreak overrideCabal;',
+                      # '',
+                      ]:
+            yield each
+
+        for kind in pkg_dict:
+            yield ''
+            for line in self.call_mixin('kind_definitions', kind, (self.static, self.frequency)):
+                yield line
+
+        yield ''
+        yield 'in {'
+
+        for pkg in sorted(self.nixpackage_list, key=lambda p: p.package_name):
+            yield self.call_mixin('package_ref', pkg.package.__class__.__name__, (pkg,))
+
+        yield '}'
+
+        for line in [
+                '',
+                '# Usage:',
+                '#',
+                '#   For any of the primary packages defined above (e.g. %s),' % sample_pkgname,
+                '#   one of the following can be done:',
+                '#',
+                '#   $ nix-build -A %s %s' % (sample_pkgname, project_fname),
+                '#     <generates "result" link in local directory>',
+                '#',
+                '#   $ nix-build -A %s.env %s' % (sample_pkgname, project_fname),
+                '#   nix-shell$ <dev environment for "cabal build">',
+                '#',
+                '#   $ git clone %s' % sample_pkgname,
+                '#   $ cd %s' % sample_pkgname,
+                '#   $ cat > shell.nix << EOF',
+                '#   { runtime ? "ghc802" }:',
+                '#   (import %s { inherit runtime; }).%s.env' % (
+                    os.path.join(os.getcwd(), project_fname), sample_pkgname),
+                '#   EOF',
+                '#   $',
+                '#          ... and then simply:',
+                '#   $ nix-shell',
+                '#   nix-shell$ ',
+                '#          ... or:',
+                '#   $ nix-shell --run "cabal build"',
+                '#',
+                '#   Note that any package specified will create an environment that',
+                '#   references that package and all of its dependencies.',
+                '#',
+        ]:
+            yield line
+
+    def _generate_summary_file(self):
+        wf = self.createActor(WriteFile)
+        project_fname = os.path.basename(self.summary_fname)
+        project_name = os.path.splitext(project_fname)[0]
+
+        pkg_dict = { kind: [ pkg
+                             for pkg in self.nixpackage_list
+                             if pkg.package.__class__.__name__ == kind ]
+                     for kind in self.mixin_kinds() }
+
+        sample_pkgname = sorted([p.package.name
+                                 for p in self.nixpackage_list
+                                 if p.package.name != project_name]
+                                + [ '{PACKAGE}' ])[0]
+
+        contents = [ line
+                     for line in self._generate_summary_data(project_fname,
+                                                             sample_pkgname,
+                                                             pkg_dict) ]
+
+        self.send(wf, ('summarygen', self.summary_fname, contents))
+
 
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
@@ -994,7 +1104,15 @@ class GenerateNixInfo(ActorTypeDispatcher):
             if not hasattr(self, 'to_status_reporter'):
                 self.to_status_reporter = sender
             self.status = ProgressStatus()
-            self.nixfiles = {}  # Key::package name, V::None if pending, Error, LocalPackage, str nix filename, CabalPrefetched
+
+            # nixfiles is a dictionary where the key is the package
+            # name and the value is None if package information lookup
+            # is pending, Error if there was an error fetching
+            # information for this package, or a package information
+            # object: StandardPackage, nix filename, CabalPrefetched
+            # object
+            self.nixfiles = {}
+
             static = 'static' in strmsg
 
             if static:
@@ -1003,10 +1121,11 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 self.c2nr = self.createActor(Cabal2Nix)
                 self.gencabal = True
             else:
-                # Use this to prefetch packages and get the hash, and then
-                # construct a nix specification that performs the
-                # cabal2nix into a store location (providing common,
-                # referenced storage and avoids re-downloading each time).
+                # Use this to prefetch packages and get the hash, and
+                # then construct a nix specification that performs the
+                # cabal2nix into a store location at nix evaluation
+                # time (providing common, referenced storage and
+                # avoids re-downloading each time).
                 self.c2nr = self.createActor(CabalPrefetch)
                 self.gencabal = False
 
@@ -1031,18 +1150,38 @@ class GenerateNixInfo(ActorTypeDispatcher):
 
 
     def receiveMsg_list(self, package_spec, sender):
-        self.package_spec = package_spec
+        self.package_spec = package_spec   # <-------------
         gbr = self.createActor(GitBranchRef)
 
         for each in package_spec:
-            if isinstance(each, RepoPackage):
+            if isinstance(each, Project):
+                continue
+            elif each.local_location:
+                # Local is the priority
+                if self.gencabal:
+                    each.noisily = self.noisy
+                    reqmsg = each.local_location
+                    reqmsg.pkgname = each.name
+                    reqmsg.noisily = self.noisy
+                    self.send(self.c2nr, reqmsg)
+                    self.status.add_setup_local()
+                    self.status.add_write_file()
+                    self.status.add_pending()
+                else:
+                    self.nixfiles[each.name] = each
+                    self.send(self.summarygen,
+                              NixPackageSpec(each, each.local_location.source_loc))
+                    self.status.add_write_file()
+                    self.status.done_write_file()
+                    continue
+            elif each.repo_location:
                 each.noisily = self.noisy
                 self.send(gbr, each)
                 self.status.add_get_info()
                 self.status.add_setup_local()
                 self.status.add_write_file()
                 self.status.add_pending()
-            elif isinstance(each, Package):
+            elif isinstance(each, StandardPackage):
                 if each.version:
                     self.send(self.c2nr, HackageRef(each.name, each.version, noisily=self.noisy))
                     self.status.add_setup_local()
@@ -1055,22 +1194,9 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     continue
             elif isinstance(each, Project):
                 continue
-            elif isinstance(each, LocalPackage):
-                if self.gencabal:
-                    each.noisily = self.noisy
-                    self.send(self.c2nr, each)
-                    self.status.add_setup_local()
-                    self.status.add_write_file()
-                    self.status.add_pending()
-                else:
-                    self.nixfiles[each.name] = each
-                    self.send(self.summarygen,
-                              NixPackageSpec(each, each.source_loc))
-                    self.status.add_write_file()
-                    self.status.done_write_file()
-                    continue
             else:
-                raise RuntimeError("Unknown package type: %s" % str(each.__class__))
+                raise RuntimeError("Unknown package type: %s %s"
+                                   % (str(each), str(each.__class__)))
             self.nixfiles[each.name] = None
 
         self._check_done()
@@ -1104,14 +1230,17 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 return
             if isinstance(self.nixfiles[r], Error):
                 errors.append('%s ERROR:: %s' % (r, repr(self.nixfiles[r])))
-        # All the files were written, now fail or write the overlay file
+        # All the files were written, now fail or write the
+        # overlay/project file
         if errors:
             self.send(self.requestor, errors)
             return
-        for each in self.package_spec:
-            if isinstance(each, Project):
-                self.send(self.summarygen, self.summary_fname % each.name)
-                self.status.add_pending()
+        for each in filter(lambda p: isinstance(p, Project), self.package_spec):
+            # Really only expect one Project specification, but if
+            # there are multiple it's fine to write multiple output
+            # files.
+            self.send(self.summarygen, self.summary_fname % each.name)
+            self.status.add_pending()
         self.send(self.to_status_reporter, copy.deepcopy(self.status))
 
     def receiveMsg_GitRef(self, gitrefmsg, sender):
@@ -1311,7 +1440,8 @@ def gen_nix(filename="package_spec", static=False,
     if isinstance(resp, dict):
         l = max(map(len, resp.keys()))
         for t in resp:
-            print('Wrote %%%ds: %%s' % l % (t, str(resp[t])))
+            print('Package %%%ds: %%s' % l % (t, getattr(resp[t], 'origin_info',
+                                                         lambda: str(resp[t]))()))
             if isinstance(resp[t], Error):
                 rval = rval + 1
     else:
