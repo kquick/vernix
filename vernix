@@ -22,17 +22,20 @@ from datetime import datetime
 
 class Settable(object):
     def __call__(self, **kw):
+        newobj = self.__class__()
+        for each in self.__dict__:
+            newobj.__dict__[each] = self.__dict__[each]
         for each in kw:
-            if hasattr(self, each):
-                setattr(self, each, kw[each])
+            if hasattr(newobj, each):
+                setattr(newobj, each, kw[each])
             else:
                 raise NameError('Attribute %s cannot be set on %s'
                                 ': it is not already present' % (self, each))
-        return self
+        return newobj
 
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
-# Objects that can be declared in the input package_spec  [INPUT]
+# Objects that can be declared in the input package specification  [INPUT]
 
 class Project(object):
     "Specifies the name of the project being declared"
@@ -1073,7 +1076,22 @@ class ReadPackageSpec(ActorTypeDispatcher):
     packages that cannot be otherwise determined.
     """
     def receiveMsg_str(self, package_file, sender):
-        package_spec = eval(open(package_file, 'r').read())
+        input_context = { key: globals()[key]
+                          for key in globals()
+                          if key in [ '__builtins__', 'Project',
+                                      'RepoIdent', 'Local',
+                                      'StandardPackage',
+                                      'HaskellPackage'
+                          ] }
+        try:
+            package_spec = eval(open(package_file, 'r').read())
+        except SyntaxError:
+            package_spec = None
+
+        if not package_spec:
+            exec(open(package_file, 'r').read(), input_context)
+            package_spec = input_context['package_spec']
+
         self.send(sender, package_spec)
 
         for each in glob.glob(
@@ -1391,14 +1409,21 @@ class SRep(ActorTypeDispatcher):
 # ----------------------------------------------------------------------
 # Main (non-actor) functionality
 
-def gen_nix(filename="package_spec", static=False,
+def gen_nix(filename=None, static=False,
             noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
     """Starts the actor processing for the input file and waits for the
        final result, displaying any ProgressStatus messages received
        in the interim.
     """
-    print('Generating nix specifications..')
+    fname = filename or ('package_spec.vx2'
+                         if os.path.exists('package_spec.vx2') else
+                         (glob.glob('*.vx2') + ['package_spec'])[0])
+    if not os.path.exists(fname):
+        sys.stderr.write('Cannot open input file: %s\n' % fname)
+        return 5
+
+    print('Generating nix specifications from',fname,'...')
     gni = asys.createActor(GenerateNixInfo)
     reporter = asys.createActor(SRep) if extern_reporter else None
     if extern_reporter:
@@ -1413,7 +1438,7 @@ def gen_nix(filename="package_spec", static=False,
         asys.tell(gni, reporter)
     status = StatusReporter()
     resp = asys.tell(gni, ' '.join(['generate',
-                                    'filename:' + filename,
+                                    'filename:' + fname,
                                     'noisily' if noisy else '',
                                     'allowUnfree' if allowUnfree else '',
                                     frequency if frequency else '',
@@ -1431,10 +1456,10 @@ def gen_nix(filename="package_spec", static=False,
         asys.tell(reporter, ActorExitRequest())
 
     if resp is None:
-        print('ERROR: Timed out without completion')
+        sys.stderr.write('ERROR: Timed out without completion\n')
         return 1
     if isinstance(resp, Error):
-        print('ERROR Response:',repr(resp))
+        sys.stderr.write('ERROR Response: %s\n' % repr(resp))
         return 2
     rval = 0
     if isinstance(resp, dict):
@@ -1445,35 +1470,49 @@ def gen_nix(filename="package_spec", static=False,
             if isinstance(resp[t], Error):
                 rval = rval + 1
     else:
-        print('Unexpected resp:',str(resp))
+        if isinstance(resp, list):
+            for each in resp:
+                sys.stderr.write('Unexpected resp: %s\n' % str(each))
+        else:
+            sys.stderr.write('Unexpected resp: %s\n' % str(resp))
     return rval
 
 
 if __name__ == "__main__":
     if '-h' in sys.argv or '--help' in sys.argv:
-        print('''Usage: %s [--help] [--fast] [--noisy] [--allowUnfree] [--daily] [--hourly]
+        print('''Usage: %s [--help] [--fast] [--noisy] [--allowUnfree]
+                           [--daily] [--hourly] [--static] [input-file]
 
-Tool to read the package_spec file and generate a nix specification
+Tool to read the package_spec file and generate a nix specification.
+The default input file is the first existing file in
+"package_spec.vx2", the first alphabetical file with the ".vx2"
+extension, or "package_spec".
 
-The package_spec contains a list of the following to describe the
-various packages (+ versions, etc.) that should be put into the nix
-specification:
+The input package spec specifies a list of the following to describe
+the various packages (+ versions, etc.) that should be put into the
+nix specification:
 
         Project("project-name")
-        Package("name", version="version",
-                dontCheck=True, jailBreak=True,
-                dontHaddock=True, extraLibraries=[...])
-        RepoPackage("name", team="github-team", repo="github-repo",
-                    subpath="subpath", version="branch-or-hash",
-                    reposerver="url"
-                    <all other Package arguments>)
-        LocalPackage("name", "path")
+        HaskellPackage("name", version="version",
+                       dontCheck=True, jailBreak=True,
+                       dontHaddock=True, extraLibraries=[...])
+        HaskellPackage("name", version="branch-or-hash",
+                       RepoIdent(reposerver="https://github.com",
+                                 team="github-team",
+                                 reponame='packagerepo',
+                                 [subpath="subpath"]),
+                       Local('/path/to/local/source'),
+                       <all other Package arguments>)
 
 There should only be one Project, which helps specify the output file.
 A package is obtained from Hackage, a RepoPackage is obtained from a
 github (or similar) repo, and a LocalPackage is obtained from a local
 directory.  For more details, see the "[INPUT]" section in the source
 above.
+
+The input package spec file should either be a Python list of the
+above elements, or a regular Python file which has a global
+"package_spec" variable specifying the list.
 
     Note: to avoid repeated queries for git credentials, use either
           the git credential helper cache (with http repo
@@ -1538,7 +1577,7 @@ additional package set downloads and storage in the nix store.
     asys = ActorSystem(systemBase='multiprocTCPBase' if '--fast' in sys.argv else 'simpleSystemBase')
     try:
         sys.exit(gen_nix(filename=([arg for arg in sys.argv[1:] if arg[0] != '-']
-                                   + ['package_spec'])[0],
+                                   + [None])[0],
                          noisy='--noisy' in sys.argv,
                          allowUnfree='--allowUnfree' in sys.argv,
                          static='--static' in sys.argv,
