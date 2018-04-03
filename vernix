@@ -93,6 +93,9 @@ class StandardPackage(Base_PackageIdent):
             else:
                 raise ValueError('Unrecognized Package argument: %s %s'
                                  % (arg, str(type(arg))))
+    def __call__(self, *args):
+        self._process_args(*args)
+        return self
     def origin_info(self):
         return str(self.local_location or self.repo_location or self.package_suppliers())
 
@@ -1063,19 +1066,27 @@ class ProjectConfig(SummaryBase):
 # ----------------------------------------------------------------------
 # Nix file output generation
 
+class InputFrom(object):
+    def __init__(self, filename, location_overrides=None):
+        self.filename = filename
+        self.location_overrides = location_overrides
+
 
 class ReadPackageSpec(ActorTypeDispatcher):
-    """When sent a string message containing the name of a package file,
-    this reads the vernix input specification and sends it back to the
-    requestor as an array of package specifications (StandardPackage
+    """When sent an InputFrom message containing the name of a package
+    file, and an optional dictionary of location overrides this reads
+    the vernix input specification and sends it back to the requestor
+    as an array of package specifications (StandardPackage
     derivations).
 
     Also sends a NixPackageSpec for each .nix file found in the
     current directory.  This allows the repository containing the
     vernix input package file to also contain .nix specifications for
     packages that cannot be otherwise determined.
+
     """
-    def receiveMsg_str(self, package_file, sender):
+    def receiveMsg_InputFrom(self, inpfrom, sender):
+        package_file = inpfrom.filename
         input_context = { key: globals()[key]
                           for key in globals()
                           if key in [ '__builtins__', 'Project',
@@ -1091,6 +1102,15 @@ class ReadPackageSpec(ActorTypeDispatcher):
         if not package_spec:
             exec(open(package_file, 'r').read(), input_context)
             package_spec = input_context['package_spec']
+
+        # Apply any location overrides
+        if inpfrom.location_overrides:
+            for pkgname in inpfrom.location_overrides:
+                for i in range(len(package_spec)):
+                    if isinstance(package_spec[i], StandardPackage) and \
+                       package_spec[i].name == pkgname:
+                        package_spec[i] = package_spec[i](Local(inpfrom.location_overrides[pkgname]))
+                        break
 
         self.send(sender, package_spec)
 
@@ -1111,11 +1131,16 @@ class GenerateNixInfo(ActorTypeDispatcher):
     def receiveMsg_ActorAddress(self, addrmsg, sender):
         self.to_status_reporter = addrmsg
 
+    def receiveMsg_dict(self, location_overrides, sender):
+        self.location_overrides = location_overrides
+        self.send(sender, 'location overrides noted')
+
     def receiveMsg_str(self, strmsg, sender):
         if 'generate' in strmsg:
             input_fname = ([ w for w in strmsg.split() if w.startswith('filename:') ]
                            + [ 'filename:package_spec'])[0].split(':')[1]
-            self.send(self.createActor(ReadPackageSpec), input_fname)
+            self.send(self.createActor(ReadPackageSpec),
+                      InputFrom(input_fname, getattr(self, 'location_overrides', None)))
 
             self.noisy = 'noisily' in strmsg
             self.requestor = sender
@@ -1409,7 +1434,8 @@ class SRep(ActorTypeDispatcher):
 # ----------------------------------------------------------------------
 # Main (non-actor) functionality
 
-def gen_nix(filename=None, static=False,
+def gen_nix(filename=None, static=False
+            overrides=None,
             noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
     """Starts the actor processing for the input file and waits for the
@@ -1437,6 +1463,9 @@ def gen_nix(filename=None, static=False,
         # longer has print access to this tty.
         asys.tell(gni, reporter)
     status = StatusReporter()
+    if overrides:
+        r = asys.ask(gni, overrides, 3)
+        assert 'location overrides noted' == r
     resp = asys.tell(gni, ' '.join(['generate',
                                     'filename:' + fname,
                                     'noisily' if noisy else '',
@@ -1482,6 +1511,7 @@ if __name__ == "__main__":
     if '-h' in sys.argv or '--help' in sys.argv:
         print('''Usage: %s [--help] [--fast] [--noisy] [--allowUnfree]
                            [--daily] [--hourly] [--static] [input-file]
+                           [name: path]
 
 Tool to read the package_spec file and generate a nix specification.
 The default input file is the first existing file in
@@ -1559,6 +1589,11 @@ current for a local development environment (although it is also
 slower to enter a nix-shell or nix-build since each cabal2nix is
 re-evaluated at that time).
 
+If any "name: path" argument pairs are supplied on the command-line,
+these are interpreted as a Local path specification for the named
+package that should override any source location specification in the
+input package specification.
+
 Additionally, any .nix files found in the same directory as the
 package_spec will automatically be added as package override
 specifications.
@@ -1574,16 +1609,27 @@ additional package set downloads and storage in the nix store.
 ''' % sys.argv[0])
         sys.exit(1)
 
+    is_src_override_arg = lambda i: sys.argv[i][0] != '-' and sys.argv[i][-1] == ':' and i+1 < len(sys.argv)
+    src_override_argi = list(filter(is_src_override_arg, range(1, len(sys.argv))))
+
+    overrides = { sys.argv[i][:-1]: sys.argv[i+1] for i in src_override_argi }
+    src_override_argargi = list(map(lambda n: n+1, src_override_argi))
+    argv = [ sys.argv[i]
+             for i in range(1, len(sys.argv))
+             if i not in src_override_argi and
+             i not in src_override_argargi ]
+
     asys = ActorSystem(systemBase='multiprocTCPBase' if '--fast' in sys.argv else 'simpleSystemBase')
     try:
-        sys.exit(gen_nix(filename=([arg for arg in sys.argv[1:] if arg[0] != '-']
+        sys.exit(gen_nix(filename=([arg for arg in argv if arg[0] != '-']
                                    + [None])[0],
-                         noisy='--noisy' in sys.argv,
-                         allowUnfree='--allowUnfree' in sys.argv,
-                         static='--static' in sys.argv,
-                         frequency=('hourly' if '--hourly' in sys.argv
-                                    else ('daily' if '--daily' in sys.argv
+                         noisy='--noisy' in argv,
+                         allowUnfree='--allowUnfree' in argv,
+                         static='--static' in argv,
+                         overrides=overrides,
+                         frequency=('hourly' if '--hourly' in argv
+                                    else ('daily' if '--daily' in argv
                                           else 'weekly')),
-                         extern_reporter='--fast' not in sys.argv))
+                         extern_reporter='--fast' not in argv))
     finally:
         asys.shutdown()
