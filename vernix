@@ -1434,7 +1434,7 @@ class SRep(ActorTypeDispatcher):
 # ----------------------------------------------------------------------
 # Main (non-actor) functionality
 
-def gen_nix(filename=None, static=False
+def gen_nix(filename=None, static=False,
             overrides=None,
             noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
