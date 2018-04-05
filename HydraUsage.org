@@ -1,0 +1,176 @@
+* Hydra and Vernix
+
+The vernix tool is used to generate a nix specification for building a
+set of packages that comprise a particular project.  The [[https://nixos.org/hydra][Hydra
+continuous build system]] is capable of building project packages in
+multiple different configurations to track changes and verify via test
+runs.  As well as assisting with local development, the vernix tool
+can generate output that can be used to configure and direct Hydra to
+build the project described in the vernix input.
+
+** Hydra overview
+
+  To configure Hydra, a Project is created (using the web admin
+  screen) and then one or more jobsets are created under that Project.
+
+  A jobset is a group of jobs that are related, usually by parameters
+  to the jobset itself.  For example, one jobset could build packages
+  using the GHC 8.0.2 compiler, a second jobset could build those same
+  packages using the GHC 8.2.2 compiler, and a third jobset could
+  build Fedora RPM(s) for the project packages.
+
+  A jobset consists of a nix expression that, when evaluated, outputs
+  a nix ~attribute set~ where each attribute is a "job" and the value
+  of the attribute is the nix expression for performing that job.  To
+  expand on the example in the previous paragraph, the GHC 8.0.2
+  compiler jobset would probably have a one job for building each
+  package in the project.  
+
+  Each jobset has a configured set of "inputs", which can be
+  references to source code repositories, output of previous jobs, or
+  static string or boolean values.  All of these inputs are available
+  to the nix expression that is evaluated for that jobset.
+
+  Each job is performed as a separate build, but each build is
+  comprised of multiple steps, where each step is a dependency for
+  that build.
+
+  #+BEGIN_EXAMPLE
+
+     project
+        |
+        +--- jobset
+        |
+        +--- jobset
+        :      +---- input(s)
+        :      |
+               +---- nix expression
+                        |
+                     [evaluation]
+                        |
+                        +--- job
+                        +--- job
+                        :     +--- build (older)
+                              +--- build (old)
+                              +--- build (latest)
+                                     +--- log
+                                     +--- output(s)
+                                     +--- dependencies
+                                            +--- dep1 (created by a step)
+                                            +--- dep2 ( " " )
+                                            :
+  #+END_EXAMPLE
+
+   There can be multiple machines used to perform builds, and
+   different machines can have different properties; a step can
+   specify the required machine properties for building that step.
+
+   Note that the output of any build can be installed on another
+   machine by a single command which pulls the build results from
+   Hydra directly.  Alternatively, each jobset has a nix channel that
+   can be subscribed to so that local nix expressions referencing a
+   package built by that jobset can download the binary directly
+   from Hydra instead of having to build it locally.
+
+** Vernix support of Hydra
+
+   The normal method of configuring a Project and its associated
+   Jobsets on Hydra is by using the web interface, but alternatively
+   just the Project can be created in this manner and as part of the
+   creation a nix expression can be specified that will generate the
+   jobset.  The vernix tool can help generate the jobset nix
+   expression and perform other hydra-related configuration of the build.
+
+   In addition, when hydra performs builds, it performs those builds
+   in "restricted" mode, which is even more strict about what inputs
+   are used for performing those builds: all inputs must be
+   *explicitly* provided and cannot be implicitly obtained by a web
+   download or other input.  This helps to ensure reproducible and
+   reliable builds.  If an input must be obtained via the network
+   (e.g. a download of a patch version from github), that input must
+   be explicit.  The vernix tool can support this restricted mode when
+   the --static command-line flag is used.
+
+
+*** Vernix Hydra process
+
+    1. The User creates vernix input package specification
+    2. The User runs vernix with the --hydra command-line flag to generate
+       a number of output files.
+    3. The vernix output is committed to a source repository for Hydra
+       reference.
+    4. The User creates a Project via the Hydra web page and specifies
+       the source repository containing the Hydra output files as the
+       declarative configuration for the Project.
+
+    Thereafter, Hydra will automatically configure itself to build the
+    various configurations described in the package specification.
+    Anytime the package specification changes, the ~vernix~ tool
+    should be re-run and the output committed as a new patch to the
+    source repository.  Hydra will automatically reconfigure any
+    jobsets based on changes in those output files, so the Project
+    does not need to be recreated.
+
+    Note however that it is possible to destroy a project on Hydra and
+    re-create it using the vernix output files at any time.  This does
+    not involve significant overhead in rebuilding the packages that
+    are part of the Project (for any packages that are the same in the
+    new Project specification as they were in the old version) because
+    the nix store on Hydra caches all outputs using a hash value, so
+    the new Project should generate packages with the same hash and
+    therefore use the set of packages that have already been built.
+
+
+#+BEGIN_EXAMPLE
+     input package spec for project "foo"
+          |
+       [vernix]
+          |
+          +-- foo-project.nix
+          |      Useable for local development and builds.  Not used by Hydra
+          |
+          +-- release.nix
+          |      Nix expression that outputs a JSON definition of jobsets for Hydra.
+          |
+          +-- vernix-run.nix
+          |      Input for a jobset (created via release.nix) which monitors package
+          |      inputs and re-generates the foo-project.nix on Hydra if there are any
+          |      changes.
+          |
+          +-- foo-hydra-project.json
+                 Hydra Project declarative input.  When creating the Hydra project,
+                 specify the declarative input as this file, coming from an input
+                 repository.
+#+END_EXAMPLE
+
+    After the vernix above is run, the release.nix, vernix-run.nix,
+    and foo-hydra-project.json files should be checked into the source
+    code repository (the foo-project.nix is not used by Hydra... the
+    vernix-run.nix will regenerate foo-project.nix as needed when
+    inputs change).  Then the Hydra Project can be created specifying
+    the foo-hydra-project.json file in the corresponding repository as
+    the declarative input.  This is all that should be necessary for
+    Hydra to begin performing regular continous builds of the "foo"
+    project.
+
+
+
+
+** Input Specifications
+
+  When creating the project specification input, one of the parameters
+  specified is either a RepoIdent or a Local source reference if the
+  package is not being obtained from the standard package management
+  locations.
+
+  The Local reference is very useful for building against source code
+  that has been checked out locally on a developer's machine.
+  However, this is not useable by Hydra because Hydra is not
+  performing the builds on the developer's machine.  The ~vernix~
+  process will ignore the Local source reference and use the RepoIdent
+  instead when generating the Hydra specification; conversely, the
+  local foo-project.nix file created will prefer a Local specification
+  over a RepoIdent.
+
+  Any Package can have one or both of a Local and a RepoIdent source
+  specification, and it is common that both are used.

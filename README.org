@@ -12,6 +12,11 @@ This is a tool to generate nix expressions for packages with specific versions.
   4. Follow the instructions in the comments at the end of that project.nix file.
   5. Optionally use additional arguments (e.g. ~--fast~).
 
+** Hydra Usage
+
+  The vernix tool can also be used to help configure the [[https://nixos.org/hydra][Hydra
+  continuous build system]].  For more information, see [[HydraUsage.org]].
+
 *** Notes
 
 [[https://git.io/vx4pk][An example ~package_spec~]] for building the Matterhorn client for
