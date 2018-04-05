@@ -10,6 +10,7 @@
 from thespian.actors import *
 from thespian.runcommand import *
 from thespian.troupe import troupe
+from collections import OrderedDict
 import subprocess
 import os
 import sys
@@ -328,6 +329,44 @@ class GitBranchRef(ActorTypeDispatcher):
 
     # def receiveUnrecognizedMessage(self, msg, sender):
     #     logging.critical('GBR: GOT UNREC FROM %s: %s', sender, msg)
+
+class GitRemoteURL(object):
+    def __init__(self, localpath, localroot, remote_url):
+        self.localpath = localpath
+        self.localroot = localroot  # The top of the git repository
+        self.local_subpath = os.path.relpath(localpath, localroot)
+        self.remote_url = remote_url
+
+class GetGitRemote(ActorTypeDispatcher):
+    """Given an input path string, returns a GitRemoteURL to identify the
+       remote Git repo associated with the input path."""
+    def receiveMsg_str(self, localpath, sender):
+        run = self.createActor(RunCommand)
+        cmd = Command('git', ['-C', localpath or os.getcwd(), 'remote', 'get-url', 'origin'],
+                      logger=False,
+                      error_ok=True)
+        cmd.requester = sender
+        cmd.input_path = localpath or os.getcwd()
+        self.send(run, cmd)
+    def receiveMsg_CommandResult(self, cmdres, sender):
+        self.send(sender, ActorExitRequest())
+        dname = cmdres.command.input_path
+        while dname and dname != '/':
+            if os.path.exists(os.path.join(dname, '.git')):
+                break
+            dname = os.path.dirname(dname)
+        if dname == '/':
+            dname = None
+        self.send(cmdres.command.requester,
+                  (GitRemoteURL(cmdres.command.input_path, dname,
+                                cmdres.stdout.split('\n')[0])
+                   if dname else
+                   Error((cmdres.command.input_path, ' could not find .git repository'),
+                         'GetGitRemote git search'))
+                  if cmdres else
+                  Error((cmdres.command.input_path, cmdres.errorstr),
+                        'GetGitRemote cmdresult'))
+
 
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
@@ -1157,7 +1196,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
             # object
             self.nixfiles = {}
 
-            static = 'static' in strmsg
+            static = 'static' in strmsg or 'hydra' in strmsg
+            hydra = 'hydra' in strmsg
 
             if static:
                 # Use this to create local .nix definitions from cabal
@@ -1195,13 +1235,28 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 if static:
                     self.send(self.summarygen, 'static')
 
+            if hydra:
+               self.cipkg = self.createActor(GenerateHydraJobsetDecl)
+               self.ciproj = self.createActor(GenerateHydraProjectDecl)
+               self.send(self.cipkg, self.ciproj)
+               self.send(self.cipkg, input_fname)
+               self.send(self.ciproj, input_fname)
+               self.status.done_pending()
+            else:
+                self.cipkg = None
+                self.ciproj = None
 
     def receiveMsg_list(self, package_spec, sender):
         self.package_spec = package_spec   # <-------------
         gbr = self.createActor(GitBranchRef)
+        num_gbr_reqs = 0
 
         for each in package_spec:
             if isinstance(each, Project):
+                if self.cipkg:
+                    self.send(self.cipkg, each)
+                if self.ciproj:
+                    self.send(self.ciproj, each)
                 continue
             elif each.local_location:
                 # Local is the priority
@@ -1216,14 +1271,15 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     self.status.add_pending()
                 else:
                     self.nixfiles[each.name] = each
-                    self.send(self.summarygen,
-                              NixPackageSpec(each, each.local_location.source_loc))
+                    pkgspec = NixPackageSpec(each, each.local_location.source_loc)
+                    self.send(self.summarygen, pkgspec)
                     self.status.add_write_file()
                     self.status.done_write_file()
                     continue
             elif each.repo_location:
                 each.noisily = self.noisy
                 self.send(gbr, each)
+                num_gbr_reqs += 1
                 self.status.add_get_info()
                 self.status.add_setup_local()
                 self.status.add_write_file()
@@ -1246,6 +1302,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                                    % (str(each), str(each.__class__)))
             self.nixfiles[each.name] = None
 
+        if self.cipkg:
+            self.send(self.cipkg, num_gbr_reqs)
         self._check_done()
 
     def receiveMsg_NixPackageSpec(self, pkgspec, sender):
@@ -1295,6 +1353,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
         self.status.done_get_info()
         gitrefmsg.noisily = self.noisy
         self.send(self.c2nr, gitrefmsg)
+        if self.cipkg:
+            self.send(self.cipkg, gitrefmsg)
         self.status.add_pending()
         self._check_done()
 
@@ -1323,7 +1383,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
             for each in filter(lambda p:
                                p.name == cabalmsg.name and
                                isinstance(p, StandardPackage), self.package_spec):
-                self.send(self.summarygen, NixPackageSpec(each, cabalmsg))
+                pspec = NixPackageSpec(each, cabalmsg)
+                self.send(self.summarygen, pspec)
                 self.status.done_write_file()
             self._check_done()
 
@@ -1338,20 +1399,38 @@ class GenerateNixInfo(ActorTypeDispatcher):
             # Everything is done, tell the requestor
             self.status.done_write_result()
             self.send(self.to_status_reporter, self.status)
-            self.send(self.requestor, self.nixfiles)
+            if self.ciproj:
+                # Project file generation is finished, but need to
+                # wait for Hydra configuration output.
+                self.project_done = True
+            else:
+                self.send(self.requestor, self.nixfiles)
         else:
             # For the file just written, tell the overlay about it as
             # well, along with any additional package information.
             for each in filter(lambda p:
                                p.name == smsg.data[0] and
                                isinstance(p, StandardPackage), self.package_spec):
-                self.send(self.summarygen, NixPackageSpec(each, smsg.data[1]))
+                pspec = NixPackageSpec(each, smsg.data[1])
+                self.send(self.summarygen, pspec)
+                self.send(cipkg, pspec)
                 self.status.done_write_file()
                 break
             else:
                 raise RuntimeError('wha??')
                 #self.send(self.summarygen, NixPackageSpec(smsg.data[0], smsg.data[1]))
             self._check_done()
+
+    def receiveMsg_HydraDecl(self, hdecl, sender):
+        self.status.done_write_file()
+        self.send(self.to_status_reporter, self.status)
+        self.nixfiles['Hydra Config'] = hdecl
+        self.send(self.cipkg, ActorExitRequest())
+        self.send(self.ciproj, ActorExitRequest())
+        self.cipkg = None
+        self.ciproj = None
+        if getattr(self, 'project_done', None):
+            self.send(self.requestor, self.nixfiles)
 
     def receiveMsg_CabalPrefetched(self, fetchmsg, sender):
         self.status.done_pending()
@@ -1360,12 +1439,400 @@ class GenerateNixInfo(ActorTypeDispatcher):
         for each in filter(lambda p:
                            p.name == fetchmsg.name and
                            isinstance(p, StandardPackage), self.package_spec):
-            self.send(self.summarygen, NixPackageSpec(each, fetchmsg))
+            pspec = NixPackageSpec(each, fetchmsg)
+            self.send(self.summarygen, pspec)
             self.status.done_write_file()
         self._check_done()
 
 
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Hydra Continuous Build and Integration support
+
+class HydraDecl(object):
+    "Output message from GenerateHydraProjectDecl actor"
+    def __init__(self, projname, jsondecl_fname, instructions=[]):
+        self.projname = projname
+        self.jsondecl_fname = jsondecl_fname
+        self.instructions = instructions
+    def origin_info(self):
+        return '\n        '.join(self.instructions)
+
+class HydraJobsetDecl(object):
+    "Output message from GenerateHydraJobsetDecl actor"
+    def __init__(self, exprpath, input_spec, instructions=[]):
+        self.exprpath = exprpath
+        self.input_spec = input_spec
+        self.instructions = instructions
+
+class HydraVernixRun(object):
+    "Output message from GenerateHydraVernixRun actor"
+    def __init__(self, jobname, exprpath, instructions=[]):
+        self.jobname = jobname
+        self.exprpath = exprpath
+        self.instructions = instructions
+
+def jobset_defaults(inputs={}, **kw):
+    rval = kw.copy()
+    inps = inputs.copy()
+    rval.update(
+        { "enabled": 1,
+          "hidden": False,
+          # "description": "NOTSET",
+          # "nixexprinput": "NOTSET",
+          # "nixexprpath": "NOTSET",
+          "checkinterval": 300,
+          "schedulingshares": 1,
+          "enableemail": True,
+          "emailoverride": "",
+          "keepnr": 3,
+          "inputs": join_dicts(inps,
+                               { "nixpkgs": { "type": "git",
+                                              "value": "https://github.com/NixOS/nixpkgs.git",
+                                              "emailresponsible": False,
+                               },
+                               })
+        })
+    return rval
+
+# ActorHelper: MessageCollector, with a list of messages to be collected (and optionally a count for each) and invokes something when the collection is complete?  What about the original requester?  Pattern for most of the GenerateHydra, as well as the Project itself.  Also what about running it in pull mode?  That way if it restarts it can send a pull requests to the creator to grab all of the info it might be missing?  Be careful of recreate bombs though...  Would also be nice if it reported what it was waiting on in response to a status request
+
+def join_dicts(*dicts):
+    ret = dicts[0].copy()
+    for d in dicts[1:]:
+        ret.update(d)
+    return ret
+
+class GenerateHydraVernixRun(ActorTypeDispatcher):
+    """"Generates the vernix-run.nix, which is the expression for the
+        projectbld job, and which runs vernix to generate the project
+        nix specification that is used as input for the rest of the
+        jobs.  Sends the HydraVernixRun response.
+    """
+    def receiveMsg_Project(self, project, sender):
+        self.project = project
+        self.requester = sender
+        self.check_done()
+
+    def receiveMsg_int(self, num_gitrefs, sender):
+        self.num_gitrefs = num_gitrefs
+
+    def receiveMsg_str(self, input_path, sender):
+        self.input_path = input_path
+
+    def receiveMsg_GitRef(self, gitref, sender):
+        if not hasattr(self, 'packages'):
+            self.packages = {}
+        self.packages[gitref.name] = gitref
+        self.check_done()
+
+    def receiveMsg_GitRemoteURL(self, gitremote, sender):
+        self.gitremote = gitremote
+
+    def check_done(self):
+        if getattr(self, 'project', None) and \
+           hasattr(self, 'input_path') and \
+           hasattr(self, 'gitremote') and \
+           hasattr(self, 'num_gitrefs') and \
+           getattr(self, 'packages', None) and \
+           len(self.packages) == self.num_gitrefs:
+            self.generate_vernix_run()
+
+    def output_filepath(self, root_relative=False):
+        if root_relative:
+            return os.path.join(self.gitremote.local_subpath, 'vernix-run.nix')
+        return 'vernix-run.nix'
+
+    def jobname(self):
+        return 'vernix_output'
+
+    def generate_vernix_run(self):
+        inputs = sorted([k for k in self.packages])
+        output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
+                   ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
+                   '}:',
+                   'with (import <nixpkgs> {});',
+                   'let',
+                   '  pybuilder = pkgs.python36.withPackages (pp: with pp; [ thespian setproctitle ]);',
+                   'in rec {',
+                   '  %s = stdenv.mkDerivation rec {' % self.jobname(),
+                   '    name = "' + self.project.name + '-master";',
+                   '    description = "Package build specification for the ${name} project";',
+                   '    system = builtins.currentSystem;',
+                   '    phases = [ "installPhase" ];',
+                   '    installPhase =',
+                   "      ''",
+                   '        python3 $vernix/bin/vernix $src/%s --noisy --static \\' % self.input_path,
+                   "          " + " \\\n          ".join([ "%s: ${%s-src}" % (k, k) for k in inputs]),
+                   '        mkdir $out',
+                   '        cp *.nix $out/;',
+                   '        cp $src/*.nix $out/;',
+                   "      '';",
+                   "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix ];",
+                   '    src = ./.;',
+                   '    inherit vernix ' + ' '.join([i + '-src' for i in inputs]) + ';',
+                   '  };',
+                   '',
+                   '  # Get the latest version.  The src override is not strictly.',
+                   '  # necessary if the default.nix specifies the local path',
+                   '  # as the source location, but it does not hurt to be',
+                   '  # explicit in this situation.',
+                   '  vernix = lib.overrideDerivation (callPackage vernix-src {}) (attrs: { src = vernix-src; });',
+                   '}'
+        ]
+        self.send(self.createActor(WriteFile),
+                  ('vernix run', self.output_filepath(), output))
+
+    def receiveMsg_Success(self, successmsg, sender):
+        self.send(self.requester,
+                  HydraVernixRun(self.jobname(),
+                                 self.output_filepath(True),
+                                 [ '* Ensure that %s is added to the repository and pushed' % self.output_filepath(True),
+                                   '  to %s before creating the Hydra project.' % self.gitremote.remote_url,
+                                 ]))
+        self.send(self.myAddress, ActorExitRequest())
+        self.send(sender, ActorExitRequest())
+
+
+class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
+    """Passed a Project, and the GenerateHydraProjectDecl address, and
+       package information, outputs a HydraJobsetDecl.  The package
+       information is initially the package name, and subsequently the
+       GitRef for that package.  When all GitRef messages have been
+       received, along with the Project and the
+       GenerateHydraProjectDecl address, the HydraJobsetDecl is sent
+       to the latter.
+
+    """
+
+    create_vernix_run = lambda self: self.createActor(GenerateHydraVernixRun)
+    create_get_git_remote = lambda self: self.createActor(GetGitRemote)
+
+    def receiveMsg_ActorAddress(self, addr, sender):
+        self.project_decl_actor = addr
+        self.check_done()
+
+    def receiveMsg_Project(self, project, sender):
+        self.project = project
+        self.send(self.vernix_run, project)
+        self.check_done()
+
+    def receiveMsg_int(self, num_gitrefs, sender):
+        self.num_gitrefs = num_gitrefs
+        self.send(self.vernix_run, num_gitrefs)
+
+    def receiveMsg_str(self, input_path, sender):
+        self.send(self.vernix_run, input_path)
+        self.output_path = os.path.dirname(input_path)
+        self.send(self.get_git_remote, self.output_path)
+
+    def receiveMsg_HydraVernixRun(self, vrun, sender):
+        self.vernix_run_file = vrun
+        self.check_done()
+
+    def receiveMsg_GitRemoteURL(self, gitremote, sender):
+        self.gitremote = gitremote
+        self.send(sender, ActorExitRequest())
+        self.send(self.vernix_run, gitremote)
+
+    def receiveMsg_GitRef(self, gitref, sender):
+        if not hasattr(self, 'packages'):
+            self.packages = {}
+        self.packages[gitref.name] = gitref
+        self.send(self.vernix_run, gitref)
+        self.check_done()
+
+    def receiveMsg_Error(self, errmsg, sender):
+        if hasattr(self, 'project_decl_actor'):
+            self.send(self.project_decl_actor, errmsg)
+        print('no requester to report this error to: %s' % str(errmsg))
+
+    def check_done(self):
+        if getattr(self, 'project', None) and \
+           getattr(self, 'project_decl_actor', None) and \
+           getattr(self, 'gitremote', None) and \
+           hasattr(self, 'vernix_run_file') and \
+           hasattr(self, 'num_gitrefs') and \
+           getattr(self, 'packages', None) and \
+           len(self.packages) == self.num_gitrefs:
+            self.generate_jobspec()
+
+    def vernix_run_jobname(self):
+        return 'projectbld'
+
+    def generate_jobspec(self):
+        project_inputs = OrderedDict(sorted(
+            { p + '-src' : { "type": "git",
+                             "value": self.packages[p].reporef,
+                             "emailresponsible": False,
+            } for p in self.packages }.items(), key=lambda e:e[0]))
+        projbld = jobset_defaults(
+            description = "Build project %s nix description" % self.project.name,
+            nixexprinput = "projectdef",
+            nixexprpath = self.vernix_run_file.exprpath,
+            inputs = join_dicts(
+                # KWQ: recursive embed of projectdef?  Yes, from other Actor
+                # KWQ: inline instead of requiring it from a repo?
+                # KWQ:   - requires vernix output to be committed to a repo
+                # KWQ:   + vernix re-runs can just be committed to update the build
+                # KWQ:   A: no inline, need user to commit this.
+                { "projectdef": {
+                    "type": "git",
+                    "value": self.gitremote.remote_url,
+                    "emailresponsible": True,
+                },
+                  "vernix-src": {
+                      "type": "git",
+                      "value": "https://github.com/kquick/vernix.git",
+                      "emailresponsible": True,
+                  }},
+                project_inputs)
+        )
+        decl = { self.vernix_run_jobname(): projbld,
+                 # KWQ: loop over ghcver configuration
+                 "ghc822": jobset_defaults(
+                     description = "Build with GHC 8.2.2",
+                     nixexprinput = "projectbld",
+                     nixexprpath = "s-cargot-letbind-project.nix",  # KWQ  # Project file?
+                     inputs = join_dicts(
+                         { "projectbld": {   # KWQ: careful reference to the "projectbld" job decl
+                             "type": "build",
+                             "value": "%s:%s:%s" % (self.project.name,
+                                                    self.vernix_run_jobname(),
+                                                    self.vernix_run_file.jobname),  # KWQ
+                             "emailresponsible": True,
+                         },
+                         "centos7_rpm_closure": {
+                             "type": "build",
+                             "value": "vm_disk_images:rpmclosures:centos7_x86-64_rpm_closure",
+                             "emailresponsible": False,
+                         },
+                         "ghcver": {   # KWQ
+                             "type": "string",
+                             "value": "ghc822",
+                             "emailresponsible": False,
+                         },
+                         },
+                         project_inputs
+                     ),
+                     ),
+        }
+        jspfx = "        "
+        jobset = '\n'.join(
+            [ '{',
+              '  jobsets = (import <nixpkgs> {}).stdenv.mkDerivation {',
+              '    name = "%s-jobsets";' % self.project.name,
+              '    version = "1";',
+              '    src = ./.;',
+              '    phases = [ "installPhase" ];',
+              '    installPhase = "cp $jsonfile $out";',
+              '    jsonfile = builtins.toFile "%s_jobsets.json"' % self.project.name,
+              "      ''",
+              jspfx + (("\n" + jspfx).join(json.dumps(decl, indent=2).split('\n'))),
+              "      '';",
+              '   };',
+              '}',
+            ])
+        self.send(self.createActor(WriteFile),
+                  ('project jobset nix expr', self.exprpath(False), [jobset]))
+
+    def receiveMsg_Success(self, successmsg, sender):
+        self.send(sender, ActorExitRequest())
+        self.send(self.project_decl_actor,
+                  HydraJobsetDecl(
+                      self.exprpath(True),
+                      { 'type': 'git',
+                        'value': self.gitremote.remote_url,
+                        'emailresponsible': False,  # KWQ: email responsible always true here
+                      },
+                      [ '',
+                        '* Ensure that %s is added to the repository and pushed' % self.exprpath(True),
+                        '  to %s before creating the Hydra project.' % self.gitremote.remote_url,
+                      ] + self.vernix_run_file.instructions))
+
+    def exprpath(self, root_relative=True):
+        if root_relative:
+            return os.path.join(self.gitremote.local_subpath, 'release.nix')
+        return 'release.nix'
+
+class GenerateHydraProjectDecl(ActorTypeDispatcher, AutoCreate):
+    """Passed a Project and a HydraJobsetDecl, writes the Hydra Project
+       JSON declaration file and sends back a HydraDecl response when
+       written.
+    """
+    create_get_git_remote = lambda self: self.createActor(GetGitRemote)
+
+    def receiveMsg_Project(self, project, sender):
+        self.requester = sender
+        self.project = project
+        self.try_generate_output(sender)
+
+    def receiveMsg_HydraJobsetDecl(self, jobset, sender):
+        self.jobset_nix = jobset
+        self.try_generate_output(sender)
+
+    def receiveMsg_str(self, input_path, sender):
+        self.output_path = os.path.dirname(input_path)
+        self.send(self.get_git_remote, self.output_path)
+
+    def receiveMsg_GitRemoteURL(self, gitremote, sender):
+        self.gitremote = gitremote
+        self.send(sender, ActorExitRequest())
+
+    def receiveMsg_Error(self, errmsg, sender):
+        if hasattr(self, 'requester'):
+            self.send(self.requester, errmsg)
+        print('no requester to report this error to: %s' % str(errmsg))
+
+    def try_generate_output(self, sender):
+        if getattr(self, 'project', None) and \
+           getattr(self, 'requester', None) and \
+           getattr(self, 'gitremote', None) and \
+           getattr(self, 'jobset_nix', None):
+            self.write_output(sender)
+
+    def write_output(self, sender):
+        decl = { "enabled": 1,
+                 "hidden": False,
+                 "description": "Hydra %s Project declaration" % self.project.name,
+                 "nixexprinput": "project_jobset",
+                 "nixexprpath": self.jobset_nix.exprpath,
+                 "checkinterval": 180,
+                 "schedulingshares": 1,
+                 "enableemail": True,
+                 "emailoverride": "",
+                 "keepnr": 2,
+                 "inputs": {
+                     "nixpkgs": { "type": "git",
+                                  "value": "https://github.com/NixOS/nixpkgs.git",
+                                  "emailresponsible": False,
+                     },
+                     "project_jobset": self.jobset_nix.input_spec,
+                 }
+        }
+        self.send(self.createActor(WriteFile),
+                  ('project json spec', self.output_fname(), [json.dumps(decl)]))
+
+    def output_fname(self, rootrel=False):
+        if rootrel:
+            return os.path.join(self.gitremote.local_subpath, '%s-decl.json' % self.project.name)
+        return '%s-decl.json' % self.project.name
+
+    def receiveMsg_Success(self, successmsg, sender):
+        self.send(self.requester,
+                  HydraDecl(self.project.name, self.output_fname(),
+                            self.jobset_nix.instructions +
+                            [ '* Create a new Hydra project:',
+                              '    Project name = ' + self.project.name,
+                              '    Declarative spec file = ' + self.output_fname(True),
+                              '    Declarative input = ' + self.gitremote.remote_url,
+                            ]))
+
+
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Status Reporting
 
 try:
     from blessings import Terminal
@@ -1438,7 +1905,7 @@ class SRep(ActorTypeDispatcher):
 # ----------------------------------------------------------------------
 # Main (non-actor) functionality
 
-def gen_nix(filename=None, static=False,
+def gen_nix(filename=None, static=False, hydra=False,
             overrides=None,
             noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
@@ -1475,7 +1942,8 @@ def gen_nix(filename=None, static=False,
                                     'noisily' if noisy else '',
                                     'allowUnfree' if allowUnfree else '',
                                     frequency if frequency else '',
-                                    'static' if static else '',
+                                    'static' if static or hydra else '',
+                                    'hydra' if hydra else '',
     ]))
     while True:
         resp = asys.listen(125)
@@ -1630,6 +2098,7 @@ additional package set downloads and storage in the nix store.
                          noisy='--noisy' in argv,
                          allowUnfree='--allowUnfree' in argv,
                          static='--static' in argv,
+                         hydra='--hydra' in argv,
                          overrides=overrides,
                          frequency=('hourly' if '--hourly' in argv
                                     else ('daily' if '--daily' in argv
