@@ -292,7 +292,7 @@ class GitBranchRef(ActorTypeDispatcher):
     def receiveMsg_CommandResult(self, cmdres, sender):
         self.troupe_work_in_progress = False
         self.send(sender, ActorExitRequest())
-        if cmdres.exitcode:
+        if not cmdres:
             self.send(self.requestor, Error((cmdres.command.reqmsg.name, cmdres.errorstr),
                                             'GitBranchRef cmdresult'))
             return
