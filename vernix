@@ -141,6 +141,24 @@ class HaskellPackage(StandardPackage):
         return 'cabal://%s' % (self.name, self.version)
 
 
+class CBI_Variants(object):
+    def __init__(self, **kw):
+        self.variants = kw
+    def __call__(self, **kw):
+        self.variants.update(kw)
+        return self
+
+
+# Which classes are made available to the evaluation of the input
+# project specification:
+Specification_Classes = [ '__builtins__', 'Project',
+                          'RepoIdent', 'Local',
+                          'StandardPackage',
+                          'HaskellPackage',
+                          'CBI_Variants',
+]
+
+
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
 # Messages that can be passed
@@ -1128,11 +1146,7 @@ class ReadPackageSpec(ActorTypeDispatcher):
         package_file = inpfrom.filename
         input_context = { key: globals()[key]
                           for key in globals()
-                          if key in [ '__builtins__', 'Project',
-                                      'RepoIdent', 'Local',
-                                      'StandardPackage',
-                                      'HaskellPackage'
-                          ] }
+                          if key in Specification_Classes }
         try:
             package_spec = eval(open(package_file, 'r').read())
         except SyntaxError:
@@ -1258,44 +1272,48 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 if self.ciproj:
                     self.send(self.ciproj, each)
                 continue
-            elif each.local_location:
-                # Local is the priority
-                if self.gencabal:
-                    each.noisily = self.noisy
-                    reqmsg = each.local_location
-                    reqmsg.pkgname = each.name
-                    reqmsg.noisily = self.noisy
-                    self.send(self.c2nr, reqmsg)
-                    self.status.add_setup_local()
-                    self.status.add_write_file()
-                    self.status.add_pending()
-                else:
-                    self.nixfiles[each.name] = each
-                    pkgspec = NixPackageSpec(each, each.local_location.source_loc)
-                    self.send(self.summarygen, pkgspec)
-                    self.status.add_write_file()
-                    self.status.done_write_file()
-                    continue
-            elif each.repo_location:
-                each.noisily = self.noisy
-                self.send(gbr, each)
-                num_gbr_reqs += 1
-                self.status.add_get_info()
-                self.status.add_setup_local()
-                self.status.add_write_file()
-                self.status.add_pending()
             elif isinstance(each, StandardPackage):
-                if each.version:
-                    self.send(self.c2nr, HackageRef(each.name, each.version, noisily=self.noisy))
+                if each.local_location:
+                    # Local is the priority
+                    if self.gencabal:
+                        each.noisily = self.noisy
+                        reqmsg = each.local_location
+                        reqmsg.pkgname = each.name
+                        reqmsg.noisily = self.noisy
+                        self.send(self.c2nr, reqmsg)
+                        self.status.add_setup_local()
+                        self.status.add_write_file()
+                        self.status.add_pending()
+                    else:
+                        self.nixfiles[each.name] = each
+                        pkgspec = NixPackageSpec(each, each.local_location.source_loc)
+                        self.send(self.summarygen, pkgspec)
+                        self.status.add_write_file()
+                        self.status.done_write_file()
+                        continue
+                elif each.repo_location:
+                    each.noisily = self.noisy
+                    self.send(gbr, each)
+                    num_gbr_reqs += 1
+                    self.status.add_get_info()
                     self.status.add_setup_local()
                     self.status.add_write_file()
                     self.status.add_pending()
                 else:
-                    self.send(self.summarygen, NixPackageSpec(each, None))
-                    self.status.add_write_file()
-                    self.status.done_write_file()
-                    continue
-            elif isinstance(each, Project):
+                    if each.version:
+                        # KWQ: this is haskell specific; should use .package_suppliers
+                        self.send(self.c2nr, HackageRef(each.name, each.version, noisily=self.noisy))
+                        self.status.add_setup_local()
+                        self.status.add_write_file()
+                        self.status.add_pending()
+                    else:
+                        self.send(self.summarygen, NixPackageSpec(each, None))
+                        self.status.add_write_file()
+                        self.status.done_write_file()
+                        continue
+            elif isinstance(each, CBI_Variants):
+                if self.cipkg:
+                    self.send(self.cipkg, each)
                 continue
             else:
                 raise RuntimeError("Unknown package type: %s %s"
@@ -1381,8 +1399,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
             # used different versions of the package anyhow.
             self.nixfiles[cabalmsg.name] = cabalmsg
             for each in filter(lambda p:
-                               p.name == cabalmsg.name and
-                               isinstance(p, StandardPackage), self.package_spec):
+                               isinstance(p, StandardPackage) and p.name == cabalmsg.name,
+                               self.package_spec):
                 pspec = NixPackageSpec(each, cabalmsg)
                 self.send(self.summarygen, pspec)
                 self.status.done_write_file()
@@ -1409,8 +1427,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
             # For the file just written, tell the overlay about it as
             # well, along with any additional package information.
             for each in filter(lambda p:
-                               p.name == smsg.data[0] and
-                               isinstance(p, StandardPackage), self.package_spec):
+                               isinstance(p, StandardPackage) and p.name == smsg.data[0],
+                               self.package_spec):
                 pspec = NixPackageSpec(each, smsg.data[1])
                 self.send(self.summarygen, pspec)
                 self.send(cipkg, pspec)
@@ -1609,6 +1627,12 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
     create_vernix_run = lambda self: self.createActor(GenerateHydraVernixRun)
     create_get_git_remote = lambda self: self.createActor(GetGitRemote)
 
+    def __init__(self, *args, **kw):
+        super(GenerateHydraJobsetDecl, self).__init__(*args, **kw)
+        self.variants = { 'ghcver': ['ghc822'],
+                          'repo_branches': ['master'],
+        }
+
     def receiveMsg_ActorAddress(self, addr, sender):
         self.project_decl_actor = addr
         self.check_done()
@@ -1648,6 +1672,9 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
             self.send(self.project_decl_actor, errmsg)
         print('no requester to report this error to: %s' % str(errmsg))
 
+    def receiveMsg_CBI_Variants(self, variants, sender):
+        self.variants.update(variants.variants)
+
     def check_done(self):
         if getattr(self, 'project', None) and \
            getattr(self, 'project_decl_actor', None) and \
@@ -1665,8 +1692,9 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         project_inputs = OrderedDict(sorted(
             { p + '-src' : { "type": "git",
                              "value": self.packages[p].reporef,
-                             "emailresponsible": False,
-            } for p in self.packages }.items(), key=lambda e:e[0]))
+                             "emailresponsible": False,  # KWQ: which inputs should email be sent for?
+              } for p in self.packages
+            }.items(), key=lambda e:e[0]))
         projbld = jobset_defaults(
             description = "Build project %s nix description" % self.project.name,
             nixexprinput = "projectdef",
@@ -1689,35 +1717,10 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                   }},
                 project_inputs)
         )
-        decl = { self.vernix_run_jobname(): projbld,
-                 # KWQ: loop over ghcver configuration
-                 "ghc822": jobset_defaults(
-                     description = "Build with GHC 8.2.2",
-                     nixexprinput = "projectbld",
-                     nixexprpath = "s-cargot-letbind-project.nix",  # KWQ  # Project file?
-                     inputs = join_dicts(
-                         { "projectbld": {   # KWQ: careful reference to the "projectbld" job decl
-                             "type": "build",
-                             "value": "%s:%s:%s" % (self.project.name,
-                                                    self.vernix_run_jobname(),
-                                                    self.vernix_run_file.jobname),  # KWQ
-                             "emailresponsible": True,
-                         },
-                         "centos7_rpm_closure": {
-                             "type": "build",
-                             "value": "vm_disk_images:rpmclosures:centos7_x86-64_rpm_closure",
-                             "emailresponsible": False,
-                         },
-                         "ghcver": {   # KWQ
-                             "type": "string",
-                             "value": "ghc822",
-                             "emailresponsible": False,
-                         },
-                         },
-                         project_inputs
-                     ),
-                     ),
-        }
+        decl = OrderedDict({
+            self.vernix_run_jobname(): projbld,
+        })
+        decl.update(sorted(self.job_variants(project_inputs), key=lambda e:e[0]))
         jspfx = "        "
         jobset = '\n'.join(
             [ '{',
@@ -1736,6 +1739,45 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
             ])
         self.send(self.createActor(WriteFile),
                   ('project jobset nix expr', self.exprpath(False), [jobset]))
+
+
+    def job_variants(self, project_inputs):
+        def jobvar_rec(jspec, rem_vnames):
+            if not rem_vnames:
+                vassoclist = sorted(jspec.items(), key=lambda e:e[0])
+                jobname = '-'.join([v[1] for v in vassoclist])
+                yield ( jobname,
+                        jobset_defaults(
+                            description = "Build with " + ', '.join(['%s %s' % e for e in vassoclist]),
+                            nixexprinput = "projectbld",
+                            nixexprpath = "s-cargot-letbind-project.nix",  # KWQ  # Project file?
+                            inputs = join_dicts(
+                                { "projectbld": {   # careful reference to the "projectbld" job decl
+                                    "type": "build",
+                                    "value": "%s:%s:%s" % (self.project.name,
+                                                           self.vernix_run_jobname(),
+                                                           self.vernix_run_file.jobname),
+                                    "emailresponsible": True,
+                                },
+                                  "centos7_rpm_closure": {
+                                      "type": "build",
+                                      "value": "vm_disk_images:rpmclosures:centos7_x86-64_rpm_closure",
+                                      "emailresponsible": False,
+                                  },
+                                },
+                                OrderedDict([
+                                    (v[0], OrderedDict({ "type": "string", "value": str(v[1]), "emailresponsible": False }))
+                                    for v in vassoclist
+                                ]),
+                                project_inputs,
+                            ),
+                        )
+                )
+                return
+            vname = rem_vnames[0]
+            for vval in self.variants[vname]:
+                yield from jobvar_rec(join_dicts(jspec, {vname: vval}), rem_vnames[1:])
+        yield from jobvar_rec({}, list(filter(lambda k: k not in ['repo_branches'], self.variants.keys())))
 
     def receiveMsg_Success(self, successmsg, sender):
         self.send(sender, ActorExitRequest())
