@@ -1160,8 +1160,11 @@ class GenerateNixInfo(ActorTypeDispatcher):
             static = 'static' in strmsg
 
             if static:
-                # Use this to create local .nix files from cabal entries.
-                # Easy and direct, but they live outside of the nix store.
+                # Use this to create local .nix definitions from cabal
+                # entries for placing in local files or embedding
+                # inline into the project file.  Easy and direct, but
+                # they live outside of the nix store and are not
+                # dynamically generated.
                 self.c2nr = self.createActor(Cabal2Nix)
                 self.gencabal = True
             else:
