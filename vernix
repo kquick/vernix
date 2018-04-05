@@ -811,7 +811,7 @@ class HaskellPackage_MixIn(object):
             self.send(self._haskell_compilers, 'get')
 
     def package_ref_HaskellPackage(self, package):
-        return '    %(package_name)s = pkgs.haskell.packages.${runtime}.%(package_name)s;' \
+        return '    %(package_name)s = pkgs.haskell.packages.${ghcver}.%(package_name)s;' \
             % package.__dict__
 
     def package_overrides_HaskellPackage(self, package_list):
@@ -820,7 +820,7 @@ class HaskellPackage_MixIn(object):
         return (
             [ '      haskell = p.haskell // {',
               '        packages = p.haskell.packages // {',
-              '          ${runtime} = p.haskell.packages.${runtime}.override {',
+              '          ${ghcver} = p.haskell.packages.${ghcver}.override {',
               '            overrides = self: super: with p.haskell.lib; {',
             ] + package_defs + [
                 '            };',
@@ -847,7 +847,7 @@ class HaskellPackage_MixIn(object):
                          getattr(pkg.package, 'repo_location', None) and \
                          getattr(pkg.package.repo_location, 'subpath', None) else 'null'
             callpkg = 'callCabal2nixSubdir "%(package_name)s" %(source_loc)s %(subpath)s %(sha256)s {}' % \
-                      { 'hpath': 'pkgs.haskell.packages.${runtime}',
+                      { 'hpath': 'pkgs.haskell.packages.${ghcver}',
                         'package_name': pkg.package.name,
                         'source_loc': srcspec,
                         'subpath': subpath,
@@ -903,7 +903,7 @@ class HaskellPackage_MixIn(object):
       sha256Arg = if isNull sha256 then "" else ''--sha256="${sha256}"'';
       subdirArg = if isNull subdir then "" else ''--subpath="${subdir}"'';
       hackagedb = hackageIndex "current-%(dateStamp)s";
-      self = pkgs.haskell.packages.${runtime};
+      self = pkgs.haskell.packages.${ghcver};
     in pkgs.stdenv.mkDerivation {
       name = "cabal2nix-${name}";
       buildInputs = [ pkgs.haskellPackages.cabal2nix
@@ -927,7 +927,7 @@ class HaskellPackage_MixIn(object):
 
   # Creates a Haskell package from a source package by calling cabal2nix on the source.
   callCabal2nixSubdir = name: src: subdir: sha256: args:
-      let self = pkgs.haskell.packages.${runtime}; in
+      let self = pkgs.haskell.packages.${ghcver}; in
       if builtins.typeOf src != "path"
       then self.callPackage (haskellSrc2nix { inherit name src subdir sha256; }) args
       else
@@ -966,7 +966,7 @@ class ProjectConfig(SummaryBase):
 
     def _generate_summary_data(self, project_fname, sample_pkgname, pkg_dict):
         for each in [ '{ nixpkgs ? <nixpkgs>',
-                      ', runtime ? "ghc822"',
+                      ', ghcver ? "ghc822"',
                       '}:',
                       '',
                       'let',
@@ -1022,8 +1022,8 @@ class ProjectConfig(SummaryBase):
                 '#   $ git clone %s' % sample_pkgname,
                 '#   $ cd %s' % sample_pkgname,
                 '#   $ cat > shell.nix << EOF',
-                '#   { runtime ? "ghc802" }:',
-                '#   (import %s { inherit runtime; }).%s.env' % (
+                '#   { ghcver ? "ghc802" }:',
+                '#   (import %s { inherit ghcver; }).%s.env' % (
                     os.path.join(os.getcwd(), project_fname), sample_pkgname),
                 '#   EOF',
                 '#   $',
