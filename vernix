@@ -1496,7 +1496,7 @@ def jobset_defaults(inputs={}, **kw):
     inps = inputs.copy()
     if 'nixpkgs_version' in kw:
         npv = kw['nixpkgs_version']
-        del kw['nixpkgs_version']
+        del rval['nixpkgs_version']
     else:
         npv = 'nixos-unstable'
     nixpkgs_val = ('https://github.com/NixOS/nixpkgs'
