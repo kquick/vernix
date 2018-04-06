@@ -1835,24 +1835,12 @@ class GenerateHydraProjectDecl(ActorTypeDispatcher, AutoCreate):
             self.write_output(sender)
 
     def write_output(self, sender):
-        decl = { "enabled": 1,
-                 "hidden": False,
-                 "description": "Hydra %s Project declaration" % self.project.name,
-                 "nixexprinput": "project_jobset",
-                 "nixexprpath": self.jobset_nix.exprpath,
-                 "checkinterval": 180,
-                 "schedulingshares": 1,
-                 "enableemail": True,
-                 "emailoverride": "",
-                 "keepnr": 2,
-                 "inputs": {
-                     "nixpkgs": { "type": "git",
-                                  "value": "https://github.com/NixOS/nixpkgs.git",
-                                  "emailresponsible": False,
-                     },
-                     "project_jobset": self.jobset_nix.input_spec,
-                 }
-        }
+        decl = jobset_defaults(
+                 inputs = { "project_jobset": self.jobset_nix.input_spec, },
+                 description = "Hydra %s Project declaration" % self.project.name,
+                 nixexprinput = "project_jobset",
+                 nixexprpath = self.jobset_nix.exprpath,
+        )
         self.send(self.createActor(WriteFile),
                   ('project json spec', self.output_fname(), [json.dumps(decl)]))
 
