@@ -1494,7 +1494,11 @@ class HydraVernixRun(object):
 def jobset_defaults(inputs={}, **kw):
     rval = kw.copy()
     inps = inputs.copy()
-    npv = kw.get('nixpkgs_version', 'nixos-unstable')
+    if 'nixpkgs_version' in kw:
+        npv = kw['nixpkgs_version']
+        del kw['nixpkgs_version']
+    else:
+        npv = 'nixos-unstable'
     nixpkgs_val = ('https://github.com/NixOS/nixpkgs'
                    if npv == 'master' else
                    'https://github.com/NixOS/nixpkgs-channels ' + npv)
