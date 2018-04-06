@@ -1494,6 +1494,10 @@ class HydraVernixRun(object):
 def jobset_defaults(inputs={}, **kw):
     rval = kw.copy()
     inps = inputs.copy()
+    npv = kw.get('nixpkgs_version', 'nixos-unstable')
+    nixpkgs_val = ('https://github.com/NixOS/nixpkgs'
+                   if npv == 'master' else
+                   'https://github.com/NixOS/nixpkgs-channels ' + npv)
     rval.update(
         { "enabled": 1,
           "hidden": False,
@@ -1507,7 +1511,7 @@ def jobset_defaults(inputs={}, **kw):
           "keepnr": 3,
           "inputs": join_dicts(inps,
                                { "nixpkgs": { "type": "git",
-                                              "value": "https://github.com/NixOS/nixpkgs.git",
+                                              "value": nixpkgs_val,
                                               "emailresponsible": False,
                                },
                                })
@@ -1751,6 +1755,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                             description = "Build with " + ', '.join(['%s %s' % e for e in vassoclist]),
                             nixexprinput = "projectbld",
                             nixexprpath = "s-cargot-letbind-project.nix",  # KWQ  # Project file?
+                            nixpkgs_version = jspec.get('nixpkgs_version', 'nixos-unstable'),
                             inputs = join_dicts(
                                 { "projectbld": {   # careful reference to the "projectbld" job decl
                                     "type": "build",
