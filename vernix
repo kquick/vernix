@@ -1675,6 +1675,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '    phases = [ "installPhase" ];',
                    '    installPhase =',
                    "      ''",
+                   '        set -x',
                    '        python3 $vernix/bin/vernix $src/%s --noisy \\' % self.input_path,
                    # Provide local sources for inputs for cabal2nix
                    # generation of nix specifications; if cabal2nix is
