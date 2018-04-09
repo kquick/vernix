@@ -511,7 +511,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            cmdres.command.requestor,
                            lambda l: (('  version = "%s";' % origmsg.gitref.branch)
                                       if isversionline(l) else
-                                      (('  src = "%s";' %
+                                      (('  src = %s;' %
                                        'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; };' %
                                         origmsg.gitref.__dict__)
                                        if issrcline(l) else l)))
