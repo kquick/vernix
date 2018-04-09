@@ -412,6 +412,10 @@ class HackageRef(object):
         self.pkgver = ver
         self.noisily = noisily
 
+isversionline = lambda l: l and (l.strip().startswith('version =') or
+                                 l.strip().startswith('version='))
+issrcline = lambda l: l and (l.strip().startswith('src =') or
+                             l.strip().startswith('src='))
 
 # Enable parallel access, but only a very limited amount: running too
 # many cabal2nix in parallel will cause them to busywait/deadlock and
@@ -427,6 +431,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
     """
 
     create_run = lambda self: self.createActor(RunCommand)
+    create_nix_hash = lambda self: self.createActor(NixHash)
 
     def receiveMsg_Local(self, localmsg, sender):
         cmd = Command('cabal2nix', [localmsg.localpath],
@@ -447,6 +452,14 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         cmd.tag = refmsg
         cmd.src = refmsg.reporef + ' ' + refmsg.ref
         self.do_run(cmd, sender)
+    def receiveMsg_GitRefWithLclSrc(self, refmsg, sender):
+        cmd = Command('cabal2nix', [refmsg.lclref],
+                      logger=None if getattr(refmsg, 'noisily', False) else False,
+                      logtag='cabal2nix:local',
+                      error_ok=not getattr(refmsg, 'noisily', False))
+        cmd.tag = refmsg
+        cmd.src = refmsg.lclref + " (S)"
+        self.do_run(cmd, sender)
     def receiveMsg_HackageRef(self, hackagemsg, sender):
         cmd = Command('cabal2nix',
                       ['cabal://' + hackagemsg.pkgname +
@@ -463,26 +476,47 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         self.troupe_work_in_progress = True
     def receiveMsg_CommandResult(self, cmdres, sender):
         self.troupe_work_in_progress = False
-        if isinstance(cmdres.command.tag, Local):
-            localmsg = cmdres.command.tag
-            self._postproc(localmsg.pkgname, None, cmdres,
+        origmsg = cmdres.command.tag
+        if isinstance(origmsg, Local):
+            self._postproc(origmsg.pkgname, None, cmdres,
                            cmdres.command.src,
                            cmdres.command.requestor)
-        elif isinstance(cmdres.command.tag, GitRef):
-            refmsg = cmdres.command.tag
+        elif isinstance(origmsg, GitRefWithLclSrc):
+            hashmsg = Local(origmsg.lclref)
+            hashmsg.grwls = cmdres
+            self.send(self.nix_hash, hashmsg)  # returns via Success message
+        elif isinstance(origmsg, GitRef):
             # Change the version reference in the nix output to the
             # git branch name.
-            self._postproc(refmsg.name, refmsg.branch, cmdres,
+            self._postproc(origmsg.name, origmsg.branch, cmdres,
                            cmdres.command.src,
                            cmdres.command.requestor,
-                           lambda l: '  version = "%s";' % refmsg.branch
-                           if l and (l.strip().startswith('version =') or
-                                     l.strip().startswith('version='))
-                           else l)
+                           lambda l: '  version = "%s";' % origmsg.branch
+                           if isversionline(l) else l)
         else:
-            hackagemsg = cmdres.command.tag
-            self._postproc(hackagemsg.pkgname, hackagemsg.pkgver, cmdres,
+            self._postproc(origmsg.pkgname, origmsg.pkgver, cmdres,
                            cmdres.command.src,
+                           cmdres.command.requestor)
+    def receiveMsg_Success(self, msg, sender):
+        if hasattr(msg, 'grwls'):
+            cmdres = msg.grwls
+            origmsg = cmdres.command.tag
+            origmsg.gitref.sha256 = msg.data
+            self._postproc(origmsg.gitref.name, origmsg.gitref.branch,
+                           cmdres, cmdres.command.src,
+                           cmdres.command.requestor,
+                           lambda l: (('  version = "%s";' % origmsg.gitref.branch)
+                                      if isversionline(l) else
+                                      (('  src = "%s";' %
+                                       'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; };' %
+                                        origmsg.gitref.__dict__)
+                                       if issrcline(l) else l)))
+    def receiveMsg_Error(self, errmsg, sender):
+        if hasattr(msg, 'grwls'):
+            cmdres = msg.grwls
+            origmsg = cmdres.command.tag
+            self._postproc(origmsg.gitref.name, origmsg.gitref.branch,
+                           cmdres, cmdres.command.src,
                            cmdres.command.requestor)
     def _postproc(self, name, version, cmdres, src_info, sender, line_op=None):
         if cmdres.exitcode:
@@ -596,6 +630,31 @@ class NixExprEval(ActorTypeDispatcher, AutoCreate):
                   Error(('Evaluating nix: ' + res.command.args[2], res.exitcode, res.errorstr),
                         'NixExprEval')
                   if res.exitcode else Success(res.stdout))
+
+class NixHash(ActorTypeDispatcher, AutoCreate):
+    """Computes the store hash of the specified local location, returning
+       it as the Success payload.
+    """
+
+    create_run = lambda self: self.createActor(RunCommand)
+
+    def receiveMsg_Local(self, localmsg, sender):
+        cmd = Command('nix-hash', ['--type', 'sha256',
+                                   '--base32',
+                                   localmsg.localpath],
+                      logger=None if getattr(localmsg, 'noisily', False) else False,
+                      logtag='nix-hash')
+        cmd._nh_requestor = sender
+        cmd._nh_origmsg = localmsg
+        self.send(self.run, cmd)
+
+    def receiveMsg_CommandResult(self, res, sender):
+        msg = (Error(('Evaluating nix: ' + res.command.args[2], res.exitcode, res.errorstr),
+                     'NixExprEval')
+               if res.exitcode else Success(res.stdout.strip()))
+        msg.grwls = res.command._nh_origmsg.grwls
+        self.send(res.command._nh_requestor, msg)
+
 
 
 # --------------------
@@ -1129,6 +1188,16 @@ class InputFrom(object):
         self.location_overrides = location_overrides
 
 
+class SrcOverrides(dict): pass
+class SrcReferences(dict): pass
+
+
+class GitRefWithLclSrc(GitRef):
+    def __init__(self, gitref, lclref):
+        self.gitref = gitref
+        self.lclref = lclref
+
+
 class ReadPackageSpec(ActorTypeDispatcher):
     """When sent an InputFrom message containing the name of a package
     file, and an optional dictionary of location overrides this reads
@@ -1185,9 +1254,13 @@ class GenerateNixInfo(ActorTypeDispatcher):
     def receiveMsg_ActorAddress(self, addrmsg, sender):
         self.to_status_reporter = addrmsg
 
-    def receiveMsg_dict(self, location_overrides, sender):
+    def receiveMsg_SrcOverrides(self, location_overrides, sender):
         self.location_overrides = location_overrides
         self.send(sender, 'location overrides noted')
+
+    def receiveMsg_SrcReferences(self, location_references, sender):
+        self.location_references = location_references
+        self.send(sender, 'location references noted')
 
     def receiveMsg_str(self, strmsg, sender):
         if 'generate' in strmsg:
@@ -1212,6 +1285,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
 
             static = 'static' in strmsg or 'hydra' in strmsg
             hydra = 'hydra' in strmsg
+            self.nolocal = 'nolocal' in strmsg
 
             if static:
                 # Use this to create local .nix definitions from cabal
@@ -1250,12 +1324,12 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     self.send(self.summarygen, 'static')
 
             if hydra:
-               self.cipkg = self.createActor(GenerateHydraJobsetDecl)
-               self.ciproj = self.createActor(GenerateHydraProjectDecl)
-               self.send(self.cipkg, self.ciproj)
-               self.send(self.cipkg, input_fname)
-               self.send(self.ciproj, input_fname)
-               self.status.done_pending()
+                self.cipkg = self.createActor(GenerateHydraJobsetDecl)
+                self.ciproj = self.createActor(GenerateHydraProjectDecl)
+                self.send(self.cipkg, self.ciproj)
+                self.send(self.cipkg, input_fname)
+                self.send(self.ciproj, input_fname)
+                self.status.done_pending()
             else:
                 self.cipkg = None
                 self.ciproj = None
@@ -1273,8 +1347,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     self.send(self.ciproj, each)
                 continue
             elif isinstance(each, StandardPackage):
-                if each.local_location:
-                    # Local is the priority
+                if each.local_location and not self.nolocal:
+                    # Local is the priority for dev
                     if self.gencabal:
                         each.noisily = self.noisy
                         reqmsg = each.local_location
@@ -1345,6 +1419,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
         except Exception as ex:
             pass
         self.send(self.requestor, errormsg)
+
     def _check_done(self):
         self.send(self.to_status_reporter, copy.deepcopy(self.status))
         errors = []
@@ -1369,6 +1444,9 @@ class GenerateNixInfo(ActorTypeDispatcher):
     def receiveMsg_GitRef(self, gitrefmsg, sender):
         self.status.done_pending()
         self.status.done_get_info()
+        if gitrefmsg.name in getattr(self, 'location_references', {}):
+            gitrefmsg = GitRefWithLclSrc(gitrefmsg,
+                                         self.location_references[gitrefmsg.name])
         gitrefmsg.noisily = self.noisy
         self.send(self.c2nr, gitrefmsg)
         if self.cipkg:
@@ -1455,8 +1533,9 @@ class GenerateNixInfo(ActorTypeDispatcher):
         self.status.done_setup_local()
         self.nixfiles[fetchmsg.name] = fetchmsg  # module name : CabalPrefetched
         for each in filter(lambda p:
-                           p.name == fetchmsg.name and
-                           isinstance(p, StandardPackage), self.package_spec):
+                           isinstance(p, StandardPackage) and
+                           p.name == fetchmsg.name,
+                           self.package_spec):
             pspec = NixPackageSpec(each, fetchmsg)
             self.send(self.summarygen, pspec)
             self.status.done_write_file()
@@ -1547,6 +1626,12 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
     def receiveMsg_str(self, input_path, sender):
         self.input_path = input_path
 
+    def receiveMsg_GitRefWithLclSrc(self, lclgitref, sender):
+        if not hasattr(self, 'packages'):
+            self.packages = {}
+        self.packages[lclgitref.gitref.name] = lclgitref
+        self.check_done()
+
     def receiveMsg_GitRef(self, gitref, sender):
         if not hasattr(self, 'packages'):
             self.packages = {}
@@ -1590,7 +1675,17 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '    installPhase =',
                    "      ''",
                    '        python3 $vernix/bin/vernix $src/%s --noisy \\' % self.input_path,
-                   # "          " + " \\\n          ".join([ "%s: ${%s-src}" % (k, k) for k in inputs]),
+                   # Provide local sources for inputs for cabal2nix
+                   # generation of nix specifications; if cabal2nix is
+                   # provided with the Repository address, it will try
+                   # to load these into the local store, which is an
+                   # invalid change during the build.  Only use the
+                   # local inputs for cabal2nix however and not the
+                   # actual nix specification (: and not =) because
+                   # otherwise the input specification doesn't match
+                   # the native project file and therefore this isn't
+                   # seen as a valid build substitute.
+                   "          " + "\n          ".join([ "%s: ${%s-src} \\" % (k, k) for k in inputs]),
                    "          --static",
                    '        mkdir $out',
                    '        cp *.nix $out/;',
@@ -1669,6 +1764,13 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         self.send(sender, ActorExitRequest())
         self.send(self.vernix_run, gitremote)
 
+    def receiveMsg_GitRefWithLclSrc(self, lclgitref, sender):
+        if not hasattr(self, 'packages'):
+            self.packages = {}
+        self.packages[lclgitref.gitref.name] = lclgitref
+        self.send(self.vernix_run, lclgitref)
+        self.check_done()
+
     def receiveMsg_GitRef(self, gitref, sender):
         if not hasattr(self, 'packages'):
             self.packages = {}
@@ -1700,7 +1802,11 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
     def generate_jobspec(self):
         project_inputs = OrderedDict(sorted(
             { p + '-src' : { "type": "git",
-                             "value": self.packages[p].reporef,
+                             "value": getattr(self.packages[p], 'reporef',
+                                              getattr(self.packages[p], 'gitref',
+                                                          GitRef('nopkg',
+                                                                 'nobranch', 'noref',
+                                                                 'NO-VALUE-AVAILABLE')).reporef),
                              "emailresponsible": False,  # KWQ: which inputs should email be sent for?
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
@@ -1945,8 +2051,8 @@ class SRep(ActorTypeDispatcher):
 # ----------------------------------------------------------------------
 # Main (non-actor) functionality
 
-def gen_nix(filename=None, static=False, hydra=False,
-            overrides=None,
+def gen_nix(filename=None, static=False, hydra=False, nolocal=False,
+            overrides=None, references=None,
             noisy=False, allowUnfree=False, frequency=None,
             extern_reporter=False):
     """Starts the actor processing for the input file and waits for the
@@ -1977,6 +2083,9 @@ def gen_nix(filename=None, static=False, hydra=False,
     if overrides:
         r = asys.ask(gni, overrides, 3)
         assert 'location overrides noted' == r
+    if references:
+        r = asys.ask(gni, references, 3)
+        assert 'location references noted' == r
     resp = asys.tell(gni, ' '.join(['generate',
                                     'filename:' + fname,
                                     'noisily' if noisy else '',
@@ -1984,6 +2093,7 @@ def gen_nix(filename=None, static=False, hydra=False,
                                     frequency if frequency else '',
                                     'static' if static or hydra else '',
                                     'hydra' if hydra else '',
+                                    'nolocal' if nolocal else '',
     ]))
     while True:
         resp = asys.listen(125)
@@ -2101,10 +2211,21 @@ current for a local development environment (although it is also
 slower to enter a nix-shell or nix-build since each cabal2nix is
 re-evaluated at that time).
 
-If any "name: path" argument pairs are supplied on the command-line,
-these are interpreted as a Local path specification for the named
-package that should override any source location specification in the
-input package specification.
+Source location references and overrides can be supplied on the
+command-line.  An override specifies a location to use *instead* of
+the contents of the package specification file and is specified as
+"package-name= local-path".  A location reference is similar, but it
+only affects the cabal2nix invocation; the cabal2nix uses the local
+source reference as input but the output is modified back to the
+(repository) reference contained in the package specification input.
+This latter functionality is used for Hydra builds and other
+"restricted" or "pure" modes (cabal2nix will attempt to read from the
+remote repository and write the retrieved information into the store,
+which is an invalid store modification during a nix build).
+
+The --nolocal flag will instruct vernix to ignore any Local
+references; this is commonly used by Hydra or other remote build
+environments.
 
 Additionally, any .nix files found in the same directory as the
 package_spec will automatically be added as package override
@@ -2121,15 +2242,23 @@ additional package set downloads and storage in the nix store.
 ''' % sys.argv[0])
         sys.exit(1)
 
-    is_src_override_arg = lambda i: sys.argv[i][0] != '-' and sys.argv[i][-1] == ':' and i+1 < len(sys.argv)
-    src_override_argi = list(filter(is_src_override_arg, range(1, len(sys.argv))))
+    is_src_spec_arg = lambda m: lambda v: lambda i: v[i][0] != '-' and v[i][-1] == m and i+1 < len(v)
+    is_src_override_arg = is_src_spec_arg('=')
+    is_src_reference_arg = is_src_spec_arg(':')
+    nexti = lambda n: n+1
+    src_argdict = lambda v, s: { v[i][:-1]: v[i+1] for i in s }
+    remove_srcargs = lambda v, s: [ v[i] for i in range(0, len(v))
+                                    if i not in s and
+                                    i not in list(map(nexti, s)) ]
 
-    overrides = { sys.argv[i][:-1]: sys.argv[i+1] for i in src_override_argi }
-    src_override_argargi = list(map(lambda n: n+1, src_override_argi))
-    argv = [ sys.argv[i]
-             for i in range(1, len(sys.argv))
-             if i not in src_override_argi and
-             i not in src_override_argargi ]
+    inpargs = sys.argv[1:]
+    src_override_argi = list(filter(is_src_override_arg(inpargs), range(0, len(inpargs))))
+    overrides = SrcOverrides(src_argdict(inpargs, src_override_argi))
+    argv_noov = remove_srcargs(inpargs, src_override_argi)
+
+    src_reference_argi = list(filter(is_src_reference_arg(argv_noov), range(0, len(argv_noov))))
+    references = SrcReferences(src_argdict(argv_noov, src_reference_argi))
+    argv = remove_srcargs(argv_noov, src_reference_argi)
 
     asys = ActorSystem(systemBase='multiprocTCPBase' if '--fast' in sys.argv else 'simpleSystemBase')
     try:
@@ -2139,7 +2268,9 @@ additional package set downloads and storage in the nix store.
                          allowUnfree='--allowUnfree' in argv,
                          static='--static' in argv,
                          hydra='--hydra' in argv,
+                         nolocal='--nolocal' in argv,
                          overrides=overrides,
+                         references=references,
                          frequency=('hourly' if '--hourly' in argv
                                     else ('daily' if '--daily' in argv
                                           else 'weekly')),
