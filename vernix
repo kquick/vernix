@@ -482,6 +482,10 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            cmdres.command.src,
                            cmdres.command.requestor)
         elif isinstance(origmsg, GitRefWithLclSrc):
+            if not cmdres:
+                self._postproc(origmsg.name, origmsg.branch, cmdres,
+                               cmdres.command.src, cmdres.command.requestor)
+                return
             hashmsg = Local(origmsg.lclref)
             hashmsg.grwls = cmdres
             self.send(self.nix_hash, hashmsg)  # returns via Success message
@@ -512,13 +516,11 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                                         origmsg.gitref.__dict__)
                                        if issrcline(l) else l)))
     def receiveMsg_Error(self, msg, sender):
-        print('ERR:',msg)
         if hasattr(msg, 'grwls'):
             cmdres = msg.grwls
             origmsg = cmdres.command.tag
-            self._postproc(origmsg.gitref.name, origmsg.gitref.branch,
-                           cmdres, cmdres.command.src,
-                           cmdres.command.requestor)
+            self.send(cmdres.command.requestor,
+                      Error((origmsg.gitref.name, str(msg)), 'Cabal2Nix'))
     def _postproc(self, name, version, cmdres, src_info, sender, line_op=None):
         if cmdres.exitcode:
             self.send(sender, Error((name, cmdres.errorstr), 'Cabal2Nix'))
@@ -650,8 +652,8 @@ class NixHash(ActorTypeDispatcher, AutoCreate):
         self.send(self.run, cmd)
 
     def receiveMsg_CommandResult(self, res, sender):
-        msg = (Error(('Evaluating nix: ' + res.command.args[2], res.exitcode, res.errorstr),
-                     'NixExprEval')
+        msg = (Error(('Generating nix hash: ' + str(res.command.args), res.exitcode, res.errorstr),
+                     'NixHash')
                if res.exitcode else Success(res.stdout.strip()))
         msg.grwls = res.command._nh_origmsg.grwls
         self.send(res.command._nh_requestor, msg)
