@@ -1695,7 +1695,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '        cp *.nix $out/;',
                    '        cp $src/*.nix $out/;',
                    "      '';",
-                   "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix ];",
+                   "    buildInputs = [ vernix nix pybuilder git cacert nix-prefetch-git cabal2nix ];",
                    '    src = ./.;',
                    '    inherit vernix ' + ' '.join([i + '-src' for i in inputs]) + ';',
                    '  };',
