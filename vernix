@@ -511,7 +511,8 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                                        'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; };' %
                                         origmsg.gitref.__dict__)
                                        if issrcline(l) else l)))
-    def receiveMsg_Error(self, errmsg, sender):
+    def receiveMsg_Error(self, msg, sender):
+        print('ERR:',msg)
         if hasattr(msg, 'grwls'):
             cmdres = msg.grwls
             origmsg = cmdres.command.tag
