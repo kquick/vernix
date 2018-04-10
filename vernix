@@ -939,7 +939,8 @@ class HaskellPackage_MixIn(object):
             [ '      haskell = p.haskell // {',
               '        packages = p.haskell.packages // {',
               '          ${ghcver} = p.haskell.packages.${ghcver}.override {',
-              '            overrides = self: super: with p.haskell.lib; {',
+              '            overrides = self: super: with p.haskell.lib; rec {',
+              '              fetchgit = p.fetchgit;
             ] + package_defs + [
                 '            };',
                 '          };',
