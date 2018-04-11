@@ -1690,7 +1690,13 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # the native project file and therefore this isn't
                    # seen as a valid build substitute.
                    "          " + "\n          ".join([ "%s: ${%s-src} \\" % (k, k) for k in inputs]),
-                   "          --static",
+                   # Specify --nolocal and --static so that vernix
+                   # knows this *is* hydra running and that any Local
+                   # source references should be ignored, and
+                   # cabal2nix should be performed directly instead of
+                   # embedded into the output nix expression for
+                   # dynamic evaluation.
+                   "          --static --nolocal",
                    '        mkdir $out',
                    '        cp *.nix $out/;',
                    '        cp $src/*.nix $out/;',
