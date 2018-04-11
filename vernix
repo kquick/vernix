@@ -462,10 +462,12 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         self.do_run(cmd, sender)
     def receiveMsg_HackageRef(self, hackagemsg, sender):
         localdb = 'hackage/01-index.tar'
-        args = list(filter(None,
-                           [localdb if os.path.exists(localdb) else None,
-                            'cabal://' + hackagemsg.pkgname +
-                            ('-' + hackagemsg.pkgver if hackagemsg.pkgver else '')]))
+        if os.path.exists(localdb):
+            args = ['--hackage-db', localdb]
+        else:
+            args = []
+        args = args + [ 'cabal://' + hackagemsg.pkgname +
+                        ('-' + hackagemsg.pkgver if hackagemsg.pkgver else '')]
         print('cabal2nix args',str(args))
         cmd = Command('cabal2nix', args,
                       logger=None if hackagemsg.noisily else False,
