@@ -461,7 +461,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         cmd.src = refmsg.lclref + " (S)"
         self.do_run(cmd, sender)
     def receiveMsg_HackageRef(self, hackagemsg, sender):
-        localdb = 'hackage/01-index.tar.gz'
+        localdb = 'hackage/01-index.tar'
         args = list(filter(None,
                            [localdb if os.path.exists(localdb) else None,
                             'cabal://' + hackagemsg.pkgname +
