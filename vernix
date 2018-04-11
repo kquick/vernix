@@ -461,9 +461,12 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         cmd.src = refmsg.lclref + " (S)"
         self.do_run(cmd, sender)
     def receiveMsg_HackageRef(self, hackagemsg, sender):
+        localdb = os.path.exists('hackage/01-index.tar.gz')
         cmd = Command('cabal2nix',
-                      ['cabal://' + hackagemsg.pkgname +
-                       ('-' + hackagemsg.pkgver if hackagemsg.pkgver else '')],
+                      list(filter(None,
+                                  [localdb if os.path.exists(localdb) else None,
+                                   'cabal://' + hackagemsg.pkgname +
+                                   ('-' + hackagemsg.pkgver if hackagemsg.pkgver else '')])),
                       logger=None if hackagemsg.noisily else False,
                       logtag='cabal2nix:hackage',
                       error_ok=not hackagemsg.noisily)
@@ -1678,6 +1681,12 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '    installPhase =',
                    "      ''",
                    '        set -x',
+                   '        mkdir hackage',
+                   '        curl --cacert ${cacert}/etc/ssl/certs/ca-bundle.crt \\',
+                   '             --compressed \\',
+                   '             -o hackage/01-index.tar.gz \\',
+                   '             https://hackage.haskell.org/01-index.tar.gz',
+                   '        gunzip  hackage/01-index.tar.gz',
                    '        python3 $vernix/bin/vernix $src/%s --noisy \\' % self.input_path,
                    # Provide local sources for inputs for cabal2nix
                    # generation of nix specifications; if cabal2nix is
@@ -1701,7 +1710,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '        cp *.nix $out/;',
                    '        cp $src/*.nix $out/;',
                    "      '';",
-                   "    buildInputs = [ vernix nix pybuilder git cacert nix-prefetch-git cabal2nix ];",
+                   "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix cacert ];",
                    '    src = ./.;',
                    '    inherit vernix ' + ' '.join([i + '-src' for i in inputs]) + ';',
                    '  };',
