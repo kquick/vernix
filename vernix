@@ -1980,7 +1980,7 @@ class GenerateHydraProjectDecl(ActorTypeDispatcher, AutoCreate):
                  nixexprpath = self.jobset_nix.exprpath,
         )
         self.send(self.createActor(WriteFile),
-                  ('project json spec', self.output_fname(), [json.dumps(decl)]))
+                  ('project json spec', self.output_fname(), [json.dumps(decl, indent=2)]))
 
     def output_fname(self, rootrel=False):
         if rootrel:
