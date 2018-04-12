@@ -2332,6 +2332,8 @@ additional package set downloads and storage in the nix store.
 ''' % sys.argv[0])
         sys.exit(1)
 
+    os.environ['NIX_PREFETCH_GIT_DEEP_CLONE'] = '0'
+
     is_src_spec_arg = lambda m: lambda v: lambda i: v[i][0] != '-' and v[i][-1] == m and i+1 < len(v)
     is_src_override_arg = is_src_spec_arg('=')
     is_src_reference_arg = is_src_spec_arg(':')
