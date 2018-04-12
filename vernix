@@ -1867,13 +1867,13 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         return 'projectbld'
 
     def generate_jobspec(self):
+        gitval_val = lambda ref: (ref.cbi_reporef, ref.branch)
+        gitval = lambda p: (gitval_val(self.packages[p].gitref)
+                            if isinstance(self.packages[p], GitRefWithLclSrc) else
+                            gitval_val(self.packages[p]))
         project_inputs = OrderedDict(sorted(
             { p + '-src' : { "type": "git",
-                             "value": getattr(self.packages[p], 'cbi_reporef',
-                                              getattr(self.packages[p], 'gitref',
-                                                          GitRef('nopkg',
-                                                                 'nobranch', 'noref',
-                                                                 'NO-VALUE-AVAILABLE')).cbi_reporef),
+                             "value": "%s %s 0" % gitval(p),
                              "emailresponsible": False,  # KWQ: which inputs should email be sent for?
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
