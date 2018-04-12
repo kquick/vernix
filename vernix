@@ -379,15 +379,21 @@ class GitRemoteURL(object):
                                        ('' if path.endswith('.git') else '.git'))
 
             else:
-                # Replace ssh orig with replacement. Orig or
-                # replacement may contain user portion.
-                orig_atpos = self.remote_url.find('@')
-                orig_name = '' if orig_atpos == -1 else self.remote_url[:orig_atpos+1]
-                orig_colonpos = self.remote_url.find(':')
-                repl_atpos = proj_reposerver.find('@')
-                self.remote_url = ( (orig_name if orig_name and repl_atpos == -1 else '') +
-                                    proj_reposerver +
-                                    self.remote_url[orig_colonpos:] )
+                if repl[0] in ('http', 'https'):
+                    # Replace ssh orig with http replacement
+                    orig_colonpos = self.remote_url.find(':')
+                    endpos = -4 if self.remote_url.endswith('.git') else len(self.remote_url)
+                    self.remote_url = ( proj_reposerver + '/' + self.remote_url[orig_colonpos+1:endpos])
+                else:
+                    # Replace ssh orig with ssh replacement. Orig or
+                    # replacement may contain user portion.
+                    orig_atpos = self.remote_url.find('@')
+                    orig_name = '' if orig_atpos == -1 else self.remote_url[:orig_atpos+1]
+                    orig_colonpos = self.remote_url.find(':')
+                    repl_atpos = proj_reposerver.find('@')
+                    self.remote_url = ( (orig_name if orig_name and repl_atpos == -1 else '') +
+                                        proj_reposerver +
+                                        self.remote_url[orig_colonpos:] )
 
 
 class GetGitRemote(ActorTypeDispatcher):
