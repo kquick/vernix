@@ -1731,7 +1731,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '             --compressed \\',
                    '             -o hackage/01-index.tar.gz \\',
                    '             https://hackage.haskell.org/01-index.tar.gz',
-                   '        gunzip  hackage/01-index.tar.gz',
+                   '        gunzip  hackage/01-index.tar.gz || mv hackage/01-index.tar.gz hackage/01-index.tar',
                    '        python3 $vernix/bin/vernix $src/%s --noisy \\' % self.input_path,
                    # Provide local sources for inputs for cabal2nix
                    # generation of nix specifications; if cabal2nix is
