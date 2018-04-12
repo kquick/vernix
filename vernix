@@ -1500,6 +1500,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
     def receiveMsg_GitRef(self, gitrefmsg, sender):
         self.status.done_pending()
         self.status.done_get_info()
+        name = gitrefmsg.name
         if gitrefmsg.name in getattr(self, 'location_references', {}):
             gitrefmsg = GitRefWithLclSrc(gitrefmsg,
                                          self.location_references[gitrefmsg.name])
@@ -1510,7 +1511,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
         # is just for the cipkg Hydra output, otherwise this is the
         # location to use for the local project as well.
         for each in filter(lambda p:
-                           isinstance(p, StandardPackage) and p.name == gitrefmsg.name,
+                           isinstance(p, StandardPackage) and p.name == name,
                            self.package_spec):
             if self.nolocal or not each.local_location:
                 self.send(self.c2nr, gitrefmsg)
