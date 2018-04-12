@@ -20,6 +20,7 @@ import json
 import copy
 import glob
 from datetime import datetime
+import urllib.parse
 
 class Settable(object):
     def __call__(self, **kw):
@@ -48,16 +49,20 @@ class Base_Location(object): pass
 class RepoIdent(Base_Location, Settable):
     "Specifies the Source Code Repository coordinates for this package"
     def __init__(self, reposerver='https://github.com',
-                 team=None, reponame=None, subpath=None):
+                 team=None, reponame=None, subpath=None, cbi_reposerver=None):
         super(RepoIdent, self).__init__()
         self.reposerver = reposerver
         self.team = team
         self.reponame = reponame
         self.subpath = subpath
         self.sep1 = ':' if self.reposerver.startswith('git@') else '/'
+        self.cbi_reposerver = cbi_reposerver or reposerver
     @property
     def source_loc(self):
         return '%(reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
+    @property
+    def cbi_source_loc(self):
+        return '%(cbi_reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
 
 class Local(Base_Location):
     "Specifies a local directory for this package's source"
@@ -271,9 +276,10 @@ class WriteFile(ActorTypeDispatcher):
 
 class GitRef(object):
     """Reference to a specific git patch."""
-    def __init__(self, name, branch, ref, reporef, subpath=None):
+    def __init__(self, name, branch, ref, reporef, subpath=None, cbi_reporef=None):
         self.name = name        # The name from the input RepoIdent
         self.reporef = reporef  # The repository reference (url + team + reponame)
+        self.cbi_reporef = cbi_reporef or reporef  # Repository reference that CBI system should use (e.g. if private)
         self.branch = branch    # The input version from the RepoIdent
         self.ref = ref          # The patch reference obtained from the repository
         self.subpath = subpath  # the subpath in the repo where this package lives (from RepoIdent)
@@ -320,6 +326,7 @@ class GitBranchRef(ActorTypeDispatcher):
         branch = cmdres.command.reqmsg.version or 'master'
         match = list(filter(lambda l: l and l[-(len(branch)+1):] == '/' + branch, lines))
         reporef = cmdres.command.reqmsg.repo_location.source_loc
+        cbi_reporef = cmdres.command.reqmsg.repo_location.cbi_source_loc
         if len(match) == 0:
             # This does not match a branch name.  If all characters
             # are hex chars, it may simply be a sha reference which
@@ -333,6 +340,7 @@ class GitBranchRef(ActorTypeDispatcher):
             else:
                 self.send(self.requestor, GitRef(name=name, branch=branch, ref=branch,
                                                  reporef=reporef,
+                                                 cbi_reporef=cbi_reporef,
                                                  subpath=cmdres.command.reqmsg.repo_location.subpath))
         elif len(match) > 1:
             self.send(self.requestor,
@@ -342,7 +350,7 @@ class GitBranchRef(ActorTypeDispatcher):
                             'GitBranchRef multiple matches'))
         else:
             self.send(self.requestor, GitRef(name=name, branch=branch, ref=match[0].split('\t')[0],
-                                             reporef=reporef,
+                                             reporef=reporef, cbi_reporef=cbi_reporef,
                                              subpath=cmdres.command.reqmsg.repo_location.subpath))
 
     # def receiveUnrecognizedMessage(self, msg, sender):
@@ -354,6 +362,33 @@ class GitRemoteURL(object):
         self.localroot = localroot  # The top of the git repository
         self.local_subpath = os.path.relpath(localpath, localroot)
         self.remote_url = remote_url
+    def proj_url_update(self, proj_reposerver):
+        if proj_reposerver:
+            orig = urllib.parse.urlparse(self.remote_url)
+            repl = urllib.parse.urlparse(proj_reposerver)
+            if orig[0] in ('http', 'https'):
+                if repl[0] in ('http', 'https'):
+                    # Replace url parts with the corresponding replacement
+                    parts = [ repl[part] or orig[part] for part in range(6) ]
+                    self.remote_url = urllib.parse.urlunparse(parts)
+                else:
+                    # Replace http orig with ssh replacement.  Assumes
+                    # replacement is just the host or user@host portion.
+                    self.remote_url = (proj_reposerver + ':' +
+                                       path[(1 if path[0] == '/' else 0):] +
+                                       ('' if path.endswith('.git') else '.git'))
+
+            else:
+                # Replace ssh orig with replacement. Orig or
+                # replacement may contain user portion.
+                orig_atpos = self.remote_url.find('@')
+                orig_name = '' if orig_atpos == -1 else self.remote_url[:orig_atpos+1]
+                orig_colonpos = self.remote_url.find(':')
+                repl_atpos = proj_reposerver.find('@')
+                self.remote_url = ( (orig_name if orig_name and repl_atpos == -1 else '') +
+                                    proj_reposerver +
+                                    self.remote_url[orig_colonpos:] )
+
 
 class GetGitRemote(ActorTypeDispatcher):
     """Given an input path string, returns a GitRemoteURL to identify the
@@ -1397,6 +1432,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
             elif isinstance(each, CBI_Variants):
                 if self.cipkg:
                     self.send(self.cipkg, each)
+                    self.send(self.ciproj, each)
                 continue
             else:
                 raise RuntimeError("Unknown package type: %s %s"
@@ -1783,6 +1819,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
 
     def receiveMsg_GitRemoteURL(self, gitremote, sender):
         self.gitremote = gitremote
+        self.gitremote.proj_url_update(self.variants.get('proj_reposerver', None))
         self.send(sender, ActorExitRequest())
         self.send(self.vernix_run, gitremote)
 
@@ -1807,6 +1844,8 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
 
     def receiveMsg_CBI_Variants(self, variants, sender):
         self.variants.update(variants.variants)
+        if hasattr(self, 'gitremote'):
+            self.gitremote.proj_url_update(self.variants.get('proj_reposerver', None))
 
     def check_done(self):
         if getattr(self, 'project', None) and \
@@ -1824,11 +1863,11 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
     def generate_jobspec(self):
         project_inputs = OrderedDict(sorted(
             { p + '-src' : { "type": "git",
-                             "value": getattr(self.packages[p], 'reporef',
+                             "value": getattr(self.packages[p], 'cbi_reporef',
                                               getattr(self.packages[p], 'gitref',
                                                           GitRef('nopkg',
                                                                  'nobranch', 'noref',
-                                                                 'NO-VALUE-AVAILABLE')).reporef),
+                                                                 'NO-VALUE-AVAILABLE')).cbi_reporef),
                              "emailresponsible": False,  # KWQ: which inputs should email be sent for?
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
@@ -1915,7 +1954,8 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
             vname = rem_vnames[0]
             for vval in self.variants[vname]:
                 yield from jobvar_rec(join_dicts(jspec, {vname: vval}), rem_vnames[1:])
-        yield from jobvar_rec({}, list(filter(lambda k: k not in ['repo_branches'], self.variants.keys())))
+        yield from jobvar_rec({}, list(filter(lambda k: k not in ['repo_branches', 'proj_reposerver'],
+                                              self.variants.keys())))
 
     def receiveMsg_Success(self, successmsg, sender):
         self.send(sender, ActorExitRequest())
@@ -1943,6 +1983,10 @@ class GenerateHydraProjectDecl(ActorTypeDispatcher, AutoCreate):
     """
     create_get_git_remote = lambda self: self.createActor(GetGitRemote)
 
+    def __init__(self, *args, **kw):
+        super(GenerateHydraProjectDecl, self).__init__(*args, **kw)
+        self.proj_reposerver = None
+
     def receiveMsg_Project(self, project, sender):
         self.requester = sender
         self.project = project
@@ -1958,12 +2002,18 @@ class GenerateHydraProjectDecl(ActorTypeDispatcher, AutoCreate):
 
     def receiveMsg_GitRemoteURL(self, gitremote, sender):
         self.gitremote = gitremote
+        self.gitremote.proj_url_update(getattr(self, 'proj_reposerver', None))
         self.send(sender, ActorExitRequest())
 
     def receiveMsg_Error(self, errmsg, sender):
         if hasattr(self, 'requester'):
             self.send(self.requester, errmsg)
         print('no requester to report this error to: %s' % str(errmsg))
+
+    def receiveMsg_CBI_Variants(self, variants, sender):
+        self.proj_reposerver = variants.variants.get('proj_reposerver', None)
+        if hasattr(self, 'gitremote'):
+            self.gitremote.proj_url_update(self.proj_reposerver)
 
     def try_generate_output(self, sender):
         if getattr(self, 'project', None) and \
