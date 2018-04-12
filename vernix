@@ -1399,8 +1399,13 @@ class GenerateNixInfo(ActorTypeDispatcher):
             elif isinstance(each, StandardPackage):
                 if each.local_location and not self.nolocal:
                     # Local is the priority for dev
+                    each.noisily = self.noisy
+                    # But if there is a repo, get that info in case
+                    # hydra output is being generated.
+                    if each.repo_location and self.cipkg:
+                        self.send(gbr, each)
+                        num_gbr_reqs += 1
                     if self.gencabal:
-                        each.noisily = self.noisy
                         reqmsg = each.local_location
                         reqmsg.pkgname = each.name
                         reqmsg.noisily = self.noisy
@@ -1499,9 +1504,16 @@ class GenerateNixInfo(ActorTypeDispatcher):
             gitrefmsg = GitRefWithLclSrc(gitrefmsg,
                                          self.location_references[gitrefmsg.name])
         gitrefmsg.noisily = self.noisy
-        self.send(self.c2nr, gitrefmsg)
         if self.cipkg:
             self.send(self.cipkg, gitrefmsg)
+        # If local was allowed, then use that location and this gitref
+        # is just for the cipkg Hydra output, otherwise this is the
+        # location to use for the local project as well.
+        for each in filter(lambda p:
+                           isinstance(p, StandardPackage) and p.name == gitrefmsg.name,
+                           self.package_spec):
+            if self.nolocal or not each.local_location:
+                self.send(self.c2nr, gitrefmsg)
         self.status.add_pending()
         self._check_done()
 
