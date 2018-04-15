@@ -545,7 +545,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         # This version will locally fetch the repo without any
         # submodule fetches and then perform the cabal2nix on the
         # locally-fetched version to avoid submodule fetching.
-        self.send(self.createActor(GitTempClone),
+        self.send(self.createActor(NixPrefetchGitLocal),
                   CloneReq(refmsg.ref, refmsg, sender,
                            getattr(refmsg, 'noisily', False)))
         self.troupe_work_in_progress = True
@@ -804,6 +804,47 @@ class NixExprEval(ActorTypeDispatcher, AutoCreate):
                   Error(('Evaluating nix: ' + res.command.args[2], res.exitcode, res.errorstr),
                         'NixExprEval')
                   if res.exitcode else Success(res.stdout))
+
+
+class NixPrefetchGitLocal(ActorTypeDispatcher):
+    """Uses nix-prefetch-git to obtain a git repo from the remote in the
+       same manner that it will be retrieved during the build, so that
+       the nix-hash and cabal2nix operations can be performed on this
+       local version.  This avoids updating the store which cannot be
+       done in restricted mode during evaluation.
+    """
+
+    def receiveMsg_CloneReq(self, gitspec, sender):
+        if getattr(self, 'clonedir', None):
+            self.send(sender, Error(('error cloning',
+                                     'already cloned a github repo'),
+                                    'git clone of %s' % gitspec.git_ref))
+            return
+        self.clonedir = tempfile.TemporaryDirectory()
+        cmd = Command('nix-prefetch-git', ['--builder',
+                                           '--url', gitspec.refmsg.reporef,
+                                           '--out', self.clonedir.name,
+                                           '--rev', gitspec.refmsg.ref],
+                      logger=None if getattr(gitspec, 'noisily', False) else False,
+                      logtag='local:nix-prefetch-git',
+                      error_ok=not getattr(gitspec, 'noisily', False))
+        cmd.tag = gitspec
+        cmd.requestor = sender
+        self.send(self.createActor(RunCommand), cmd)
+
+    def receiveMsg_CommandResult(self, cmdres, sender):
+        if cmdres:
+            cmdres.command.tag.local_dir = self.clonedir.name
+            self.send(cmdres.command.requestor, Success(cmdres.command.tag))
+        else:
+            errmsg = Error(('error on nix-prefetch-git', cmdres.errorstr),
+                           'prefetch of %s' % cmdres.command.args[1])
+            errmsg.requestor = cmdres.command.tag.requestor
+            self.send(cmdres.command.requestor, errmsg)
+
+    def receiveMsg_ActorExitRequest(self, exitreq, sender):
+        self.clonedir.cleanup()
+
 
 class NixHash(ActorTypeDispatcher, AutoCreate):
     """Computes the store hash of the specified local location, returning
