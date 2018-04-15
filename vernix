@@ -153,7 +153,6 @@ class CBI_Variants(object):
         self.variants.update(kw)
         return self
 
-
 # Which classes are made available to the evaluation of the input
 # project specification:
 Specification_Classes = [ '__builtins__', 'Project',
@@ -468,7 +467,6 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
        will run cabal2nix for that package to generate a nix
        specification, sending back a CabalSpec describing the nix
        result or an Error on failure.
-
     """
     def __init__(self, *args, **kw):
         super(Cabal2Nix, self).__init__(*args, **kw)
@@ -477,6 +475,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
 
     create_run = lambda self: self.createActor(RunCommand)
     create_nix_hash = lambda self: self.createActor(NixHash)
+
 
     def receiveMsg_Local(self, localmsg, sender):
         cmd = Command('cabal2nix', [localmsg.localpath],
@@ -513,7 +512,6 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
             args = []
         args = args + [ 'cabal://' + hackagemsg.pkgname +
                         ('-' + hackagemsg.pkgver if hackagemsg.pkgver else '')]
-        print('cabal2nix args',str(args))
         cmd = Command('cabal2nix', args,
                       logger=None if hackagemsg.noisily else False,
                       logtag='cabal2nix:hackage',
