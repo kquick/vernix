@@ -21,6 +21,8 @@ import copy
 import glob
 from datetime import datetime
 import urllib.parse
+import tempfile
+
 
 class Settable(object):
     def __call__(self, **kw):
@@ -426,6 +428,60 @@ class GetGitRemote(ActorTypeDispatcher):
                         'GetGitRemote cmdresult'))
 
 
+class CloneReq(object):
+    def __init__(self, git_ref, refmsg, requestor, noisily=False):
+        self.refmsg = refmsg
+        self.requestor = requestor
+        self.noisily = noisily
+        self.local_dir = None
+
+class GitTempClone(ActorTypeDispatcher):
+    """Temporarily clones a git repo (specified by CloneReq) into local
+       storage to handle subsequent queries; the storage is removed
+       when this Actor is killed.  Returns Success with the CloneReq
+       or Error
+    """
+
+    def receiveMsg_CloneReq(self, gitspec, sender):
+        if getattr(self, 'clonedir', None):
+            self.send(sender, Error(('error cloning',
+                                     'already cloned a github repo'),
+                                    'git clone of %s' % gitspec.git_ref))
+            return
+        self.clonedir = tempfile.TemporaryDirectory()
+        cmd = Command('git', ['clone', gitspec.refmsg.reporef, self.clonedir.name],
+                      logger=None if getattr(gitspec, 'noisily', False) else False,
+                      logtag='git-temp-clone',
+                      error_ok=not getattr(gitspec, 'noisily', False))
+        cmd.tag = gitspec
+        cmd.requestor = sender
+        self.send(self.createActor(RunCommand), cmd)
+
+    def receiveMsg_CommandResult(self, cmdres, sender):
+        if cmdres:
+            if cmdres.command.args[0] == 'clone':
+                gitspec = cmdres.command.tag
+                refmsg = gitspec.refmsg
+                cmd = Command('git', ['-C', self.clonedir.name, 'checkout', refmsg.branch],
+                              logger=None if getattr(gitspec, 'noisily', False) else False,
+                              logtag='git-temp-checkout',
+                              error_ok=not getattr(gitspec, 'noisily', False))
+                cmd.tag = gitspec
+                cmd.requestor = cmdres.command.requestor
+                self.send(sender, cmd)
+                return
+            cmdres.command.tag.local_dir = self.clonedir.name
+            self.send(cmdres.command.requestor, Success(cmdres.command.tag))
+        else:
+            errmsg = Error(('error cloning', cmdres.errorstr),
+                           'git clone of %s' % cmdres.command.args[1])
+            errmsg.requestor = cmdres.command.tag.requestor
+            self.send(cmdres.command.requestor, errmsg)
+
+    def receiveMsg_ActorExitRequest(self, exitreq, sender):
+        self.clonedir.cleanup()
+
+
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
 # Haskell package handling and Cabal information
@@ -486,6 +542,19 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         cmd.src = localmsg.localpath
         self.do_run(cmd, sender)
     def receiveMsg_GitRef(self, refmsg, sender):
+        # This version will locally fetch the repo without any
+        # submodule fetches and then perform the cabal2nix on the
+        # locally-fetched version to avoid submodule fetching.
+        self.send(self.createActor(GitTempClone),
+                  CloneReq(refmsg.ref, refmsg, sender,
+                           getattr(refmsg, 'noisily', False)))
+        self.troupe_work_in_progress = True
+    def old_receiveMsg_GitRef(self, refmsg, sender):
+        # Note: this allows cabal2nix to handle the fetch, but
+        # cabal2nix fetches all submodules but it really just needs
+        # the top-level .cabal file... better way to retrieve that
+        # from the repo for better efficiency? (watch out for
+        # subpath...)
         args = ['--revision', refmsg.ref]
         if refmsg.subpath:
             args.extend(['--subpath', refmsg.subpath])
@@ -546,7 +615,11 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                 return
             hashmsg = Local(origmsg.lclref)
             hashmsg.grwls = cmdres
-            self.send(self.nix_hash, hashmsg)  # returns via Success message
+            self.send(self.createActor(NixHash), hashmsg)  # KWQ: self.nix_hash # returns via Success message
+        elif isinstance(origmsg, CloneReq):
+            hashmsg = Local(origmsg.local_dir)
+            hashmsg.clonereq = cmdres
+            self.send(self.createActor(NixHash), hashmsg)  # KWQ: self.nix_hash # returns via Success message
         elif isinstance(origmsg, GitRef):
             # Change the version reference in the nix output to the
             # git branch name.
@@ -570,9 +643,39 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            lambda l: (('  version = "%s";' % origmsg.gitref.branch)
                                       if isversionline(l) else
                                       (('  src = %s;' %
-                                       'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; }' %
+                                       'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; fetchSubmodules=false; }' %
                                         origmsg.gitref.__dict__)
                                        if issrcline(l) else l)))
+        elif hasattr(msg, 'clonereq'):
+            cmdres = msg.clonereq
+            refmsg = cmdres.command.tag.refmsg
+            refmsg.sha256 = msg.data
+            self.send(cmdres.command.tag.cloner, ActorExitRequest())
+            src = 'fetchgit { url="%(reporef)s"; rev="%(ref)s"; fetchSubmodules=false; sha256="%(sha256)s"; }'
+            srcrepl = (('  src = %s;\n'
+                        '  postUnpack = "sourceRoot+=/%%(subpath)s; echo source root reset to $sourceRoot";'
+                        % src)
+                       if refmsg.subpath else
+                       ('  src = %s;' % src)) % refmsg.__dict__
+            self._postproc(refmsg.name, refmsg.branch,
+                           cmdres, cmdres.command.src,
+                           cmdres.command.tag.requestor,
+                           lambda l: (('  version = "%s";' % refmsg.branch)
+                                      if isversionline(l) else
+                                      (srcrepl if issrcline(l) else l)))
+
+        elif isinstance(msg.data, CloneReq):
+            cmd = Command('cabal2nix', [os.path.join(msg.data.local_dir, msg.data.refmsg.subpath)
+                                        if msg.data.refmsg.subpath else
+                                        msg.data.local_dir],
+                          logger=None if getattr(msg.data, 'noisily', False) else False,
+                          logtag='cabal2nix:git+local',
+                          error_ok=not getattr(msg.data, 'noisily', False))
+            cmd.tag = msg.data
+            cmd.tag.cloner = sender
+            refmsg = msg.data.refmsg
+            cmd.src = refmsg.reporef + ' ' + refmsg.ref
+            self.do_run(cmd, sender)
     def receiveMsg_Error(self, msg, sender):
         self.send(sender, ActorExitRequest())
         self.troupe_work_in_progress = False
@@ -581,6 +684,10 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
             origmsg = cmdres.command.tag
             self.send(cmdres.command.requestor,
                       Error((origmsg.gitref.name, str(msg)), 'Cabal2Nix'))
+        elif hasattr(msg, 'requestor'):
+            self.send(msg.requestor, msg)
+        elif hasattr(msg, 'clonereq'):
+            self.send(msg.clonereq.command.tag.requestor, msg)
     def _postproc(self, name, version, cmdres, src_info, sender, line_op=None):
         self.troupe_work_in_progress = False
         if cmdres.exitcode:
@@ -658,6 +765,7 @@ class CabalPrefetch(ActorTypeDispatcher, AutoCreate):
             fspec = 'fetchgit {' + '; '.join(['%s="%s"'%(str(K), str(fdata[K]))
                                               for K in fdata
                                               if K not in ['date', 'fetchSubmodules']]
+                                             + ['fetchSubmodules=false']
             ) + ';}'
             respmsg = CabalPrefetched(refmsg.name, refmsg.ref,
                                       sha256=None,
@@ -718,7 +826,9 @@ class NixHash(ActorTypeDispatcher, AutoCreate):
         msg = (Error(('Generating nix hash: ' + str(res.command.args), res.exitcode, res.errorstr),
                      'NixHash')
                if res.exitcode else Success(res.stdout.strip()))
-        msg.grwls = res.command._nh_origmsg.grwls
+        for each in ('grwls', 'clonereq'):
+            if hasattr(res.command._nh_origmsg, each):
+                setattr(msg, each, getattr(res.command._nh_origmsg, each))
         self.send(res.command._nh_requestor, msg)
 
 
