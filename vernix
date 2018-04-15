@@ -470,6 +470,10 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
        result or an Error on failure.
 
     """
+    def __init__(self, *args, **kw):
+        super(Cabal2Nix, self).__init__(*args, **kw)
+        self.pending_c2n = []
+        self.reqnum = 0
 
     create_run = lambda self: self.createActor(RunCommand)
     create_nix_hash = lambda self: self.createActor(NixHash)
@@ -519,10 +523,19 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         self.do_run(cmd, sender)
     def do_run(self, cmd, sender):
         cmd.requestor = sender
-        self.send(self.run, cmd)
+        cmd.reqnum = self.reqnum
+        self.reqnum = self.reqnum + 1
+        if not self.pending_c2n:
+            self.send(self.run, cmd)
+        self.pending_c2n.append(cmd)
         self.troupe_work_in_progress = True
+    def do_next(self, cmdres):
+        self.pending_c2n = [ e for e in self.pending_c2n
+                             if e.reqnum != cmdres.command.reqnum ]
+        if self.pending_c2n:
+            self.send(self.run, self.pending_c2n[0])
     def receiveMsg_CommandResult(self, cmdres, sender):
-        self.troupe_work_in_progress = False
+        self.do_next(cmdres)
         origmsg = cmdres.command.tag
         if isinstance(origmsg, Local):
             self._postproc(origmsg.pkgname, None, cmdres,
@@ -563,12 +576,15 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                                         origmsg.gitref.__dict__)
                                        if issrcline(l) else l)))
     def receiveMsg_Error(self, msg, sender):
+        self.send(sender, ActorExitRequest())
+        self.troupe_work_in_progress = False
         if hasattr(msg, 'grwls'):
             cmdres = msg.grwls
             origmsg = cmdres.command.tag
             self.send(cmdres.command.requestor,
                       Error((origmsg.gitref.name, str(msg)), 'Cabal2Nix'))
     def _postproc(self, name, version, cmdres, src_info, sender, line_op=None):
+        self.troupe_work_in_progress = False
         if cmdres.exitcode:
             self.send(sender, Error((name, cmdres.errorstr), 'Cabal2Nix'))
             return
@@ -622,10 +638,11 @@ class CabalPrefetch(ActorTypeDispatcher, AutoCreate):
     def do_run(self, cmd, sender):
         if not getattr(cmd, 'requestor', None):
             cmd.requestor = sender
-        self.send(self.run, cmd)
+        self.send(self.createActor(RunCommand), cmd)  # KWQ: self.run
         self.troupe_work_in_progress = True
 
     def receiveMsg_CommandResult(self, cmdres, sender):
+        self.send(sender, ActorExitRequest())
         self.troupe_work_in_progress = False
         if cmdres.exitcode:
             errmsg = Error((cmdres.command.tag.name
@@ -673,9 +690,10 @@ class NixExprEval(ActorTypeDispatcher, AutoCreate):
                       logger=None if getattr(exprmsg, 'noisily', False) else False,
                       logtag='nix-eval')
         cmd._nee_requestor = sender
-        self.send(self.run, cmd)
+        self.send(self.createActor(RunCommand), cmd)  # KWQ: self.run
 
     def receiveMsg_CommandResult(self, res, sender):
+        self.send(sender, ActorExitRequest())
         self.send(res.command._nee_requestor,
                   Error(('Evaluating nix: ' + res.command.args[2], res.exitcode, res.errorstr),
                         'NixExprEval')
@@ -695,9 +713,10 @@ class NixHash(ActorTypeDispatcher, AutoCreate):
                       logtag='nix-hash')
         cmd._nh_requestor = sender
         cmd._nh_origmsg = localmsg
-        self.send(self.run, cmd)
+        self.send(self.createActor(RunCommand), cmd)  # KWQ: self.run
 
     def receiveMsg_CommandResult(self, res, sender):
+        self.send(sender, ActorExitRequest())
         msg = (Error(('Generating nix hash: ' + str(res.command.args), res.exitcode, res.errorstr),
                      'NixHash')
                if res.exitcode else Success(res.stdout.strip()))
