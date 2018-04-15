@@ -252,7 +252,7 @@ class AutoCreate(object):  # KWQ: could be in Thespian
         if hasattr(self, '_ac_names'):
             for each in self._ac_names:
                 if self.__dict__.get(each, None) == childexitmsg.childAddress:
-                    setattr(self, each, None)
+                    delattr(self, each)
                     return
 
 # --------------------
