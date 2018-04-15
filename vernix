@@ -500,7 +500,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
     def receiveMsg_GitRefWithLclSrc(self, refmsg, sender):
         cmd = Command('cabal2nix', [refmsg.lclref],
                       logger=None if getattr(refmsg, 'noisily', False) else False,
-                      logtag='cabal2nix:local',
+                      logtag='cabal2nix:git+local',
                       error_ok=not getattr(refmsg, 'noisily', False))
         cmd.tag = refmsg
         cmd.src = refmsg.lclref + " (S)"
