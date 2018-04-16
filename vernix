@@ -610,7 +610,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            cmdres.command.requestor)
         elif isinstance(origmsg, GitRefWithLclSrc):
             if not cmdres:
-                self._postproc(origmsg.name, origmsg.branch, cmdres,
+                self._postproc(origmsg.gitref.name, origmsg.gitref.branch, cmdres,
                                cmdres.command.src, cmdres.command.requestor)
                 return
             hashmsg = Local(origmsg.lclref)
