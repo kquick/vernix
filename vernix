@@ -1944,7 +1944,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # cabal2nix should be performed directly instead of
                    # embedded into the output nix expression for
                    # dynamic evaluation.
-                   "          here=${projectdef}",
+                   "          here= ${projectdef}",
                    "          --static --nolocal",
                    '        mkdir $out',
                    '        cp *.nix $out/;',
