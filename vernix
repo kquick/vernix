@@ -1925,7 +1925,13 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # otherwise the input specification doesn't match
                    # the native project file and therefore this isn't
                    # seen as a valid build substitute.
-                   "          " + "\n          ".join([ "%s: ${%s-src} \\" % (k, k) for k in inputs]),
+                   "          " + "\n          ".join([ "%s: ${%s-src}%s \\"
+                                                        % (k, k,
+                                                           ("/" + self.packages[k].gitref.subpath
+                                                            if self.packages[k].gitref.subpath
+                                                            else "")
+                                                           if isinstance(self.packages[k], GitRefWithLclSrc) else "")
+                                                        for k in inputs]),
                    # Specify --nolocal and --static so that vernix
                    # knows this *is* hydra running and that any Local
                    # source references should be ignored, and
