@@ -1955,7 +1955,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # input references to the output location (crucial
                    # for tagalong nix files).
                    "          here= $out \\",
-                   "          ${projectdef}= $out \\",
+                   "          $src = $out \\",
                    "          --static --nolocal",
                    '        mkdir $out',
                    '        cp *.nix $out/;',
