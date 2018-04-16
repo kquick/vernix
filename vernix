@@ -1900,6 +1900,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
         inputs = sorted([k for k in self.packages])
         output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
                    ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
+                   ', projectdef',
                    '}:',
                    'with (import <nixpkgs> {});',
                    'let',
