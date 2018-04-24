@@ -2004,7 +2004,6 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
     def __init__(self, *args, **kw):
         super(GenerateHydraJobsetDecl, self).__init__(*args, **kw)
         self.variants = { 'ghcver': ['ghc822'],
-                          'repo_branches': ['master'],
         }
 
     def receiveMsg_ActorAddress(self, addr, sender):
@@ -2070,22 +2069,28 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
            len(self.packages) == self.num_gitrefs:
             self.generate_jobspec()
 
-    def vernix_run_jobname(self):
+    def vernix_run_jobname(self, repo_branch=None):
+        if repo_branch:
+            return 'projectbld-' + repo_branch
         return 'projectbld'
 
     def generate_jobspec(self):
-        gitval_val = lambda ref: (ref.cbi_reporef, ref.branch)
-        gitval = lambda p: (gitval_val(self.packages[p].gitref)
-                            if isinstance(self.packages[p], GitRefWithLclSrc) else
-                            gitval_val(self.packages[p]))
-        project_inputs = OrderedDict(sorted(
+        gitval_val = lambda ref, revbr: (ref.cbi_reporef,
+                                         (revbr or "master")
+                                         if ref.branch == 'master' else
+                                         (ref.branch or revbr or "master"))
+        gitval = lambda p, revbr: (gitval_val(self.packages[p].gitref, revbr)
+                                   if isinstance(self.packages[p], GitRefWithLclSrc) else
+                                   gitval_val(self.packages[p], revbr))
+        project_inputs = lambda revbr: OrderedDict(sorted(
             { p + '-src' : { "type": "git",
-                             "value": "%s %s 0" % gitval(p),
+                             "value": "%s %s 0" % gitval(p, revbr),
                              "emailresponsible": False,  # KWQ: which inputs should email be sent for?
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
-        projbld = jobset_defaults(
-            description = "Build project %s nix description" % self.project.name,
+        projbld = lambda revbr: jobset_defaults(
+            description = ("Build project %s %snix description" %
+                           (self.project.name, revbr or '')),
             nixexprinput = "projectdef",
             nixexprpath = self.vernix_run_file.exprpath,
             inputs = join_dicts(
@@ -2104,12 +2109,14 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                       "value": "https://github.com/kquick/vernix.git",
                       "emailresponsible": True,
                   }},
-                project_inputs)
+                project_inputs(revbr))
         )
         decl = OrderedDict({
-            self.vernix_run_jobname(): projbld,
+            self.vernix_run_jobname(revbr): projbld(revbr)
+            for revbr in self.variants.get('repo_branch', [None])
         })
-        decl.update(sorted(self.job_variants(project_inputs), key=lambda e:e[0]))
+        for revbr in self.variants.get('repo_branch', [None]):
+            decl.update(sorted(self.job_variants(project_inputs, repo_branch=revbr), key=lambda e:e[0]))
         jspfx = "        "
         jobset = '\n'.join(
             [ '{',
@@ -2130,14 +2137,16 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                   ('project jobset nix expr', self.exprpath(False), [jobset]))
 
 
-    def job_variants(self, project_inputs):
+    def job_variants(self, project_inputs, repo_branch=None):
         def jobvar_rec(jspec, rem_vnames):
             if not rem_vnames:
                 vassoclist = sorted(jspec.items(), key=lambda e:e[0])
-                jobname = '-'.join([v[1] for v in vassoclist])
+                jobname = '-'.join(filter(None, [v[1] for v in vassoclist] + [repo_branch]))
                 yield ( jobname,
                         jobset_defaults(
-                            description = "Build with " + ', '.join(['%s %s' % e for e in vassoclist]),
+                            description = ("Build%s with " %
+                                           (" from " + repo_branch if repo_branch else "")
+                                           + ', '.join(['%s %s' % e for e in vassoclist])),
                             nixexprinput = "projectbld",
                             nixexprpath = self.project_file,
                             nixpkgs_version = jspec.get('nixpkgs_version', 'nixos-unstable'),
@@ -2145,7 +2154,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                                 { "projectbld": {   # careful reference to the "projectbld" job decl
                                     "type": "build",
                                     "value": "%s:%s:%s" % (self.project.name,
-                                                           self.vernix_run_jobname(),
+                                                           self.vernix_run_jobname(repo_branch),
                                                            self.vernix_run_file.jobname),
                                     "emailresponsible": True },
                                   "projectdef": {
@@ -2162,7 +2171,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                                     (v[0], OrderedDict({ "type": "string", "value": str(v[1]), "emailresponsible": False }))
                                     for v in vassoclist
                                 ]),
-                                project_inputs,
+                                project_inputs(repo_branch),
                             ),
                         )
                 )
@@ -2170,8 +2179,21 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
             vname = rem_vnames[0]
             for vval in self.variants[vname]:
                 yield from jobvar_rec(join_dicts(jspec, {vname: vval}), rem_vnames[1:])
-        yield from jobvar_rec({}, list(filter(lambda k: k not in ['repo_branches', 'proj_reposerver'],
-                                              self.variants.keys())))
+
+        special_variants = ['proj_reposerver', 'repo_branch', 'distributions']
+        # The repo_branch specifies the various source branches that
+        # should be built as part of the CI build process.  These
+        # branches may or may not be the same as the primary project
+        # file build, but the difference is that the vernix-run for
+        # the CI build will specify source location overrides
+        # corresponding to the inputs, so it isn't necessary to
+        # perform the GitRev lookups, simply to specify the proper
+        # location for the CI build input.
+
+        yield from jobvar_rec({},
+                              list(filter(lambda k: k not in special_variants,
+                                          self.variants.keys())))
+
 
     def receiveMsg_Success(self, successmsg, sender):
         self.send(sender, ActorExitRequest())
