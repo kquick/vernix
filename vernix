@@ -1974,7 +1974,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # for tagalong nix files).
                    "          here= $out \\",
                    "          $src= $out \\",
-                   "          --static --nolocal",
+                   "          --static --nolocal --allowUnfree",
                    '        mkdir $out',
                    '        cp *.nix $out/;',
                    '        cp $src/*.nix $out/;',
