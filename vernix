@@ -2091,7 +2091,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
         projbld = lambda revbr: jobset_defaults(
-            description = ("Build project %s %snix description" %
+            description = ("Build project %s %s nix description" %
                            (self.project.name, revbr or '')),
             nixexprinput = "projectdef",
             nixexprpath = self.vernix_run_file.exprpath,
