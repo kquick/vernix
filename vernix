@@ -1585,8 +1585,10 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     # Local is the priority for dev
                     each.noisily = self.noisy
                     # But if there is a repo, get that info in case
-                    # hydra output is being generated.
-                    if each.repo_location and self.cipkg:
+                    # hydra output is being generated, unless there is
+                    # a source override
+                    if each.repo_location and self.cipkg and \
+                       each.name not in self.location_overrides:
                         self.send(gbr, each)
                         num_gbr_reqs += 1
                     if self.gencabal:
