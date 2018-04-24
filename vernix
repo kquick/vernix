@@ -426,7 +426,7 @@ class GetGitRemote(ActorTypeDispatcher):
                    Error((cmdres.command.input_path, ' could not find .git repository'),
                          'GetGitRemote git search'))
                   if cmdres else
-                  Error((cmdres.command.input_path, cmdres.errorstr),
+                  Error((cmdres.command.input_path, cmdres.errorstr + " for " + ' '.join(cmdres.command.args)),
                         'GetGitRemote cmdresult'))
 
 
