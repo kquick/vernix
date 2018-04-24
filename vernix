@@ -1573,6 +1573,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
         num_gbr_reqs = 0
 
         for each in package_spec:
+            each.noisily = self.noisy
             if isinstance(each, Project):
                 each.project_file = self.summary_fname % each.name
                 if self.cipkg:
@@ -1598,7 +1599,6 @@ class GenerateNixInfo(ActorTypeDispatcher):
                                             each.name in self.location_overrides or
                                             each.name in self.location_references):
                     # Local is the priority for dev
-                    each.noisily = self.noisy
                     # But if there is a repo, get that info in case
                     # hydra output is being generated, unless there is
                     # a source override
@@ -1622,7 +1622,6 @@ class GenerateNixInfo(ActorTypeDispatcher):
                         self.status.done_write_file()
                         continue
                 elif each.repo_location:
-                    each.noisily = self.noisy
                     self.send(gbr, each)
                     num_gbr_reqs += 1
                     self.status.add_get_info()
