@@ -1580,8 +1580,23 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 if self.ciproj:
                     self.send(self.ciproj, each)
                 continue
+            # Each package can come from the standard packaging tool
+            # (e.g. cabal for haskell packages), a repository, or a
+            # local directory.  A local directory takes preference for
+            # the local project file, but the CI builder cannot
+            # reference a directory on the user's local machine, so
+            # the --nolocal is used to suppress that.  However, on the
+            # CI builder, the package may have already been fetched by
+            # other portions of the CI process, so it will be
+            # specified as a location_override ("name= loc" on the
+            # cmdline) or a location_reference ("name: loc" on the
+            # cmdline), and these local references should be preferred
+            # to repo references (especially in the case where the
+            # repo may be private).
             elif isinstance(each, StandardPackage):
-                if each.local_location and not self.nolocal:
+                if each.local_location and (not self.nolocal or
+                                            each.name in self.location_overrides or
+                                            each.name in self.location_references):
                     # Local is the priority for dev
                     each.noisily = self.noisy
                     # But if there is a repo, get that info in case
