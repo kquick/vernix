@@ -69,12 +69,12 @@ class RepoIdent(Base_Location, Settable):
 class Local(Base_Location):
     "Specifies a local directory for this package's source"
     def __init__(self, localpath):
-        self.localpath = localpath
+        self._localpath = localpath
     @property
     def source_loc(self):
-        return self.localpath
+        return os.path.expandvars(os.path.expanduser(self._localpath))
     def __str__(self):
-        return self.localpath + ' directory'
+        return self.source_loc + ' directory'
 
 
 class Base_PackageIdent(object):
@@ -534,12 +534,12 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
 
 
     def receiveMsg_Local(self, localmsg, sender):
-        cmd = Command('cabal2nix', [localmsg.localpath],
+        cmd = Command('cabal2nix', [localmsg.source_loc],
                       logger=None if getattr(localmsg, 'noisily', False) else False,
                       logtag='cabal2nix:local',
                       error_ok=not getattr(localmsg, 'noisily', False))
         cmd.tag = localmsg
-        cmd.src = localmsg.localpath
+        cmd.src = localmsg.source_loc
         self.do_run(cmd, sender)
     def receiveMsg_GitRef(self, refmsg, sender):
         # This version will locally fetch the repo without any
@@ -857,7 +857,7 @@ class NixHash(ActorTypeDispatcher, AutoCreate):
 
     def receiveMsg_Local(self, localmsg, sender):
         cmd = Command('/run/current-system/sw/bin/nix-hash',
-                      ['--type', 'sha256', '--base32', localmsg.localpath],
+                      ['--type', 'sha256', '--base32', localmsg.source_loc],
                       logger=None if getattr(localmsg, 'noisily', False) else False,
                       logtag='nix-hash')
         cmd._nh_requestor = sender
