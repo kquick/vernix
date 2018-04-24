@@ -1924,6 +1924,10 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
 
     def generate_vernix_run(self):
         inputs = sorted([k for k in self.packages])
+        subpath = lambda r: ('/' + r.gitref.subpath
+                             if getattr(r, 'gitref', None)
+                             else ('/' + r.subpath
+                                   if getattr(r, 'subpath', None) else ''))
         output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
                    ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
                    ', projectdef',
@@ -1958,11 +1962,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # the native project file and therefore this isn't
                    # seen as a valid build substitute.
                    "          " + "\n          ".join([ "%s= ${%s-src}%s \\"
-                                                        % (k, k,
-                                                           ("/" + self.packages[k].gitref.subpath
-                                                            if self.packages[k].gitref.subpath
-                                                            else "")
-                                                           if isinstance(self.packages[k], GitRefWithLclSrc) else "")
+                                                        % (k, k, subpath(self.packages[k]))
                                                         for k in inputs]),
                    # Specify --nolocal and --static so that vernix
                    # knows this *is* hydra running and that any Local
