@@ -64,7 +64,9 @@ class RepoIdent(Base_Location, Settable):
         return '%(reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
     @property
     def cbi_source_loc(self):
-        return '%(cbi_reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
+        repl = {'sep': ':' if self.cbi_reposerver.startswith('git@') else '/'}
+        repl.update(self.__dict__)
+        return '%(cbi_reposerver)s%(sep)s%(team)s/%(reponame)s.git' % repl
 
 class Local(Base_Location):
     "Specifies a local directory for this package's source"
