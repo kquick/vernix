@@ -1596,14 +1596,14 @@ class GenerateNixInfo(ActorTypeDispatcher):
             # repo may be private).
             elif isinstance(each, StandardPackage):
                 if each.local_location and (not self.nolocal or
-                                            each.name in self.location_overrides or
-                                            each.name in self.location_references):
+                                            each.name in getattr(self, 'location_overrides', []) or
+                                            each.name in getattr(self, 'location_references', [])):
                     # Local is the priority for dev
                     # But if there is a repo, get that info in case
                     # hydra output is being generated, unless there is
                     # a source override
                     if each.repo_location and self.cipkg and \
-                       each.name not in self.location_overrides:
+                       each.name not in getattr(self, 'location_overrides', []):
                         self.send(gbr, each)
                         num_gbr_reqs += 1
                     if self.gencabal:
