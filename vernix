@@ -2163,11 +2163,11 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                                       "type": "git",
                                       "value": self.gitremote.remote_url,
                                       "emailresponsible": True },
-                                  "centos7_rpm_closure": {
-                                      "type": "build",
-                                      "value": "vm_disk_images:rpmclosures:centos7_x86-64_rpm_closure",
-                                      "emailresponsible": False,
-                                  },
+                                  # "centos7_rpm_closure": {
+                                  #     "type": "build",
+                                  #     "value": "vm_disk_images:rpmclosures:centos7_x86-64_rpm_closure",
+                                  #     "emailresponsible": False,
+                                  # },
                                 },
                                 OrderedDict([
                                     (v[0], OrderedDict({ "type": "string", "value": str(v[1]), "emailresponsible": False }))
