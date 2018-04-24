@@ -404,21 +404,28 @@ class GetGitRemote(ActorTypeDispatcher):
        remote Git repo associated with the input path."""
     def receiveMsg_str(self, localpath, sender):
         run = self.createActor(RunCommand)
-        cmd = Command('git', ['-C', localpath or os.getcwd(), 'remote', 'get-url', 'origin'],
+        tgtdir = self.find_gitroot(localpath or os.getcwd())
+        if not tgtdir:
+            self.send(sender, Error((localpath or os.getcwd(),
+                                     ' could not find .git repository'),
+                                    'GetGitRemote input prep'))
+            return
+        cmd = Command('git', ['-C', tgtdir, 'remote', 'get-url', 'origin'],
                       logger=False,
                       error_ok=True)
         cmd.requester = sender
-        cmd.input_path = localpath or os.getcwd()
+        cmd.input_path = tgtdir
         self.send(run, cmd)
+    @staticmethod
+    def find_gitroot(dname):
+        while dname and dname != '/':
+            if os.path.exists(os.path.join(dname, '.git')):
+                return dname
+            dname = os.path.dirname(dname)
+        return None
     def receiveMsg_CommandResult(self, cmdres, sender):
         self.send(sender, ActorExitRequest())
         dname = cmdres.command.input_path
-        while dname and dname != '/':
-            if os.path.exists(os.path.join(dname, '.git')):
-                break
-            dname = os.path.dirname(dname)
-        if dname == '/':
-            dname = None
         self.send(cmdres.command.requester,
                   (GitRemoteURL(cmdres.command.input_path, dname,
                                 cmdres.stdout.split('\n')[0])
