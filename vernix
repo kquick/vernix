@@ -550,15 +550,18 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         cmd.tag = localmsg
         cmd.src = localmsg.source_loc
         self.do_run(cmd, sender)
-    def receiveMsg_GitRef(self, refmsg, sender):
+    def local_receiveMsg_GitRef(self, refmsg, sender):
         # This version will locally fetch the repo without any
         # submodule fetches and then perform the cabal2nix on the
-        # locally-fetched version to avoid submodule fetching.
+        # locally-fetched version to avoid submodule fetching.  The
+        # downside is that the result is often not recognized as the
+        # same input source needed for a nix-shell or nix-build unless
+        # this is a source override for the -project file generation.
         self.send(self.createActor(NixPrefetchGitLocal),
                   CloneReq(refmsg.ref, refmsg, sender,
                            getattr(refmsg, 'noisily', False)))
         self.troupe_work_in_progress = True
-    def old_receiveMsg_GitRef(self, refmsg, sender):
+    def receiveMsg_GitRef(self, refmsg, sender):
         # Note: this allows cabal2nix to handle the fetch, but
         # cabal2nix fetches all submodules but it really just needs
         # the top-level .cabal file... better way to retrieve that
