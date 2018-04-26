@@ -360,10 +360,10 @@ class GitBranchRef(ActorTypeDispatcher):
     #     logging.critical('GBR: GOT UNREC FROM %s: %s', sender, msg)
 
 class GitRemoteURL(object):
-    def __init__(self, localpath, localroot, remote_url):
-        self.localpath = localpath
+    def __init__(self, inputpath, localroot, root_rel_path, remote_url):
+        self.localpath = inputpath
         self.localroot = localroot  # The top of the git repository
-        self.local_subpath = os.path.relpath(localpath, localroot)
+        self.local_subpath = root_rel_path
         self.remote_url = remote_url
     def proj_url_update(self, proj_reposerver):
         if proj_reposerver:
@@ -404,7 +404,8 @@ class GetGitRemote(ActorTypeDispatcher):
        remote Git repo associated with the input path."""
     def receiveMsg_str(self, localpath, sender):
         run = self.createActor(RunCommand)
-        tgtdir = self.find_gitroot(localpath or os.getcwd())
+        input_path = localpath or os.getcwd()
+        tgtdir, relpath = self.find_gitroot(input_path)
         if not tgtdir:
             self.send(sender, Error((localpath or os.getcwd(),
                                      ' could not find .git repository'),
@@ -414,26 +415,27 @@ class GetGitRemote(ActorTypeDispatcher):
                       logger=False,
                       error_ok=True)
         cmd.requester = sender
-        cmd.input_path = tgtdir
+        cmd.input_path = input_path
+        cmd.root_path = tgtdir
+        cmd.root_relpath = relpath
         self.send(run, cmd)
     @staticmethod
     def find_gitroot(dname):
+        relpath = []
         while dname and dname != '/':
             if os.path.exists(os.path.join(dname, '.git')):
-                return dname
-            dname = os.path.dirname(dname)
-        return None
+                return (dname, os.path.join(*tuple(relpath)) if relpath else '')
+            dname,h = os.path.split(dname)
+            relpath.append(h)
+        return (None, None)
     def receiveMsg_CommandResult(self, cmdres, sender):
         self.send(sender, ActorExitRequest())
-        dname = cmdres.command.input_path
         self.send(cmdres.command.requester,
-                  (GitRemoteURL(cmdres.command.input_path, dname,
-                                cmdres.stdout.split('\n')[0])
-                   if dname else
-                   Error((cmdres.command.input_path, ' could not find .git repository'),
-                         'GetGitRemote git search'))
+                  GitRemoteURL(cmdres.command.input_path, cmdres.command.root_path, cmdres.command.root_relpath,
+                               cmdres.stdout.split('\n')[0])
                   if cmdres else
-                  Error((cmdres.command.input_path, cmdres.errorstr + " for " + ' '.join(cmdres.command.args)),
+                  Error((cmdres.command.input_path,
+                         cmdres.errorstr + " for " + ' '.join(cmdres.command.args)),
                         'GetGitRemote cmdresult'))
 
 
