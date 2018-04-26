@@ -1688,7 +1688,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     for each in self.package_spec
                     if isinstance(each, Project)
         ]
-        if pkgspec.nix_source not in outputs:
+        if os.path.basename(pkgspec.nix_source) not in outputs:
             self.send(self.summarygen, pkgspec)
             self.status.add_write_file()
             self.status.done_write_file()
