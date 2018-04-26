@@ -1584,6 +1584,10 @@ class GenerateNixInfo(ActorTypeDispatcher):
         gbr = self.createActor(GitBranchRef)
         num_gbr_reqs = 0
 
+        should_use_local = lambda p: (not self.nolocal or
+                                      p.name in getattr(self, 'location_overrides', []) or
+                                      p.name in getattr(self, 'location_references', []))
+
         for each in package_spec:
             each.noisily = self.noisy
             if isinstance(each, Project):
@@ -1593,23 +1597,35 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 if self.ciproj:
                     self.send(self.ciproj, each)
                 continue
-            # Each package can come from the standard packaging tool
-            # (e.g. cabal for haskell packages), a repository, or a
-            # local directory.  A local directory takes preference for
-            # the local project file, but the CI builder cannot
-            # reference a directory on the user's local machine, so
-            # the --nolocal is used to suppress that.  However, on the
-            # CI builder, the package may have already been fetched by
-            # other portions of the CI process, so it will be
-            # specified as a location_override ("name= loc" on the
-            # cmdline) or a location_reference ("name: loc" on the
-            # cmdline), and these local references should be preferred
-            # to repo references (especially in the case where the
-            # repo may be private).
             elif isinstance(each, StandardPackage):
-                if each.local_location and (not self.nolocal or
-                                            each.name in getattr(self, 'location_overrides', []) or
-                                            each.name in getattr(self, 'location_references', [])):
+                # Each package can come from the standard packaging tool
+                # (e.g. cabal for haskell packages), a repository, or a
+                # local directory.  A local directory takes preference for
+                # the local project file, but the CI builder cannot
+                # reference a directory on the user's local machine, so
+                # the --nolocal is used to suppress that.  However, on the
+                # CI builder, the package may have already been fetched by
+                # other portions of the CI process, so it will be
+                # specified as a location_override ("name= loc" on the
+                # cmdline) or a location_reference ("name: loc" on the
+                # cmdline), and these local references should be preferred
+                # to repo references (especially in the case where the
+                # repo may be private).
+                #
+                # Also note that if the local location does not exist, it
+                # will fallback to the repo source (or to cabal), which
+                # allows the input specifications to contain local
+                # references to default git submodule locations which may
+                # or may not be populated.
+                if each.local_location and should_use_local(each) and \
+                   not os.path.exists(each.local_location.source_loc):
+                    print('**Warning: Local %s does not exist; falling back to %s' %
+                          (each.local_location.source_loc,
+                           'repository location'
+                           if each.repo_location else 'default package source'))
+                    each.local_location = None
+
+                if each.local_location and should_use_local(each):
                     # Local is the priority for dev
                     # But if there is a repo, get that info in case
                     # hydra output is being generated, unless there is
