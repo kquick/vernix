@@ -1618,7 +1618,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 # references to default git submodule locations which may
                 # or may not be populated.
                 if each.local_location and should_use_local(each) and \
-                   not os.path.exists(each.local_location.source_loc):
+                   (not os.path.exists(each.local_location.source_loc) or
+                    not glob.glob(os.path.join(each.local_location.source_loc, '*'))):
                     print('**Warning: Local %s does not exist; falling back to %s' %
                           (each.local_location.source_loc,
                            'repository location'
