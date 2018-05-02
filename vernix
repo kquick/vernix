@@ -2122,20 +2122,30 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         return 'projectbld'
 
     def generate_jobspec(self):
-        gitval_val = lambda ref, revbr: (ref.cbi_reporef,
-                                         (revbr or "master")
-                                         if ref.branch == 'master' else
-                                         (ref.branch or revbr or "master"))
-        gitval = lambda p, revbr: (gitval_val(self.packages[p].gitref, revbr)
-                                   if isinstance(self.packages[p], GitRefWithLclSrc) else
-                                   gitval_val(self.packages[p], revbr))
-        project_inputs = lambda revbr: OrderedDict(sorted(
+        gitval_val = lambda ref, revbr, brlist: (
+            ref.cbi_reporef,
+            # If input was just "master", use the revbr override
+            # (defaulting to master).  If input was on a branch and
+            # that branch is NOT one of the CBI_Variant repo_branch
+            # members, assume it does not exist and use the input
+            # branch. Otherwise, use the input override (defaulting to
+            # master).
+            (revbr or "master")
+            if ref.branch == 'master' else
+            (ref.branch
+             if ref.branch and ref.branch not in (brlist or []) else
+             (revbr or "master")))
+        gitval = lambda p, revbr, brlist: (
+            gitval_val(self.packages[p].gitref, revbr, brlist)
+            if isinstance(self.packages[p], GitRefWithLclSrc) else
+            gitval_val(self.packages[p], revbr, brlist))
+        project_inputs = lambda revbr, brlist: OrderedDict(sorted(
             { p + '-src' : { "type": "git",
-                             "value": "%s %s 0" % gitval(p, revbr),
-                             "emailresponsible": False,  # KWQ: which inputs should email be sent for?
+                             "value": "%s %s 0" % gitval(p, revbr, brlist),
+                             "emailresponsible": False,
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
-        projbld = lambda revbr: jobset_defaults(
+        projbld = lambda revbr, brlist: jobset_defaults(
             description = ("Build project %s %s nix description" %
                            (self.project.name, revbr or '')),
             nixexprinput = "projectdef",
@@ -2156,14 +2166,18 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                       "value": "https://github.com/kquick/vernix.git",
                       "emailresponsible": True,
                   }},
-                project_inputs(revbr))
+                project_inputs(revbr, brlist))
         )
+        branchlist = self.variants.get('repo_branch', [None])
         decl = OrderedDict({
-            self.vernix_run_jobname(revbr): projbld(revbr)
-            for revbr in self.variants.get('repo_branch', [None])
+            self.vernix_run_jobname(revbr): projbld(revbr, branchlist)
+            for revbr in branchlist
         })
-        for revbr in self.variants.get('repo_branch', [None]):
-            decl.update(sorted(self.job_variants(project_inputs, repo_branch=revbr), key=lambda e:e[0]))
+        for revbr in branchlist:
+            decl.update(sorted(self.job_variants(project_inputs,
+                                                 repo_branch=revbr,
+                                                 branch_list=branchlist),
+                               key=lambda e:e[0]))
         jspfx = "        "
         jobset = '\n'.join(
             [ '{',
@@ -2184,7 +2198,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                   ('project jobset nix expr', self.exprpath(False), [jobset]))
 
 
-    def job_variants(self, project_inputs, repo_branch=None):
+    def job_variants(self, project_inputs, repo_branch=None, branch_list=None):
         def jobvar_rec(jspec, rem_vnames):
             if not rem_vnames:
                 vassoclist = sorted(jspec.items(), key=lambda e:e[0])
@@ -2218,7 +2232,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                                     (v[0], OrderedDict({ "type": "string", "value": str(v[1]), "emailresponsible": False }))
                                     for v in vassoclist
                                 ]),
-                                project_inputs(repo_branch),
+                                project_inputs(repo_branch, branch_list),
                             ),
                         )
                 )
