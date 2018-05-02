@@ -1864,6 +1864,9 @@ class HydraVernixRun(object):
         self.exprpath = exprpath
         self.instructions = instructions
 
+def normalized_jobname(inpname):
+    return inpname.replace('/', '~')
+
 def jobset_defaults(inputs={}, **kw):
     rval = kw.copy()
     inps = inputs.copy()
@@ -2119,7 +2122,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
 
     def vernix_run_jobname(self, repo_branch=None):
         if repo_branch:
-            return 'projectbld-' + repo_branch
+            return normalized_jobname('projectbld-' + repo_branch)
         return 'projectbld'
 
     def generate_jobspec(self):
@@ -2203,7 +2206,9 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         def jobvar_rec(jspec, rem_vnames):
             if not rem_vnames:
                 vassoclist = sorted(jspec.items(), key=lambda e:e[0])
-                jobname = '-'.join(filter(None, [v[1] for v in vassoclist] + [repo_branch]))
+                jobname = normalized_jobname('-'.join(filter(None,
+                                                             [v[1] for v in vassoclist] +
+                                                             [repo_branch])))
                 yield ( jobname,
                         jobset_defaults(
                             description = ("Build%s with " %
