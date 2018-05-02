@@ -23,6 +23,7 @@ from datetime import datetime
 import urllib.parse
 import tempfile
 
+EMAILRESPONSIBLE = True
 
 class Settable(object):
     def __call__(self, **kw):
@@ -2142,7 +2143,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         project_inputs = lambda revbr, brlist: OrderedDict(sorted(
             { p + '-src' : { "type": "git",
                              "value": "%s %s 0" % gitval(p, revbr, brlist),
-                             "emailresponsible": False,
+                             "emailresponsible": EMAILRESPONSIBLE,
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
         projbld = lambda revbr, brlist: jobset_defaults(
@@ -2229,7 +2230,8 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                                   # },
                                 },
                                 OrderedDict([
-                                    (v[0], OrderedDict({ "type": "string", "value": str(v[1]), "emailresponsible": False }))
+                                    (v[0], OrderedDict({ "type": "string", "value": str(v[1]),
+                                                         "emailresponsible": False }))
                                     for v in vassoclist
                                 ]),
                                 project_inputs(repo_branch, branch_list),
@@ -2263,7 +2265,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                       self.exprpath(True),
                       { 'type': 'git',
                         'value': self.gitremote.remote_url,
-                        'emailresponsible': False,  # KWQ: email responsible always true here
+                        'emailresponsible': EMAILRESPONSIBLE,
                       },
                       [ '',
                         '* Ensure that %s is added to the repository and pushed' % self.exprpath(True),
