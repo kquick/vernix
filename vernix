@@ -1868,7 +1868,12 @@ def normalized_jobname(inpname):
     return inpname.replace('/', '~')
 
 def jobset_defaults(inputs={}, **kw):
-    rval = kw.copy()
+    rval = { 'checkinterval': 300,
+             'schedulingshares': 1,
+             'emailoverride': '',
+             'keepnr': 3,
+    }
+    rval.update(kw)
     inps = inputs.copy()
     if 'nixpkgs_version' in kw:
         npv = kw['nixpkgs_version']
@@ -1884,11 +1889,7 @@ def jobset_defaults(inputs={}, **kw):
           # "description": "NOTSET",
           # "nixexprinput": "NOTSET",
           # "nixexprpath": "NOTSET",
-          "checkinterval": 300,
-          "schedulingshares": 1,
           "enableemail": True,
-          "emailoverride": "",
-          "keepnr": 3,
           "inputs": join_dicts(inps,
                                { "nixpkgs": { "type": "git",
                                               "value": nixpkgs_val,
@@ -2180,7 +2181,8 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         for revbr in branchlist:
             decl.update(sorted(self.job_variants(project_inputs,
                                                  repo_branch=revbr,
-                                                 branch_list=branchlist),
+                                                 branch_list=branchlist,
+                                                 email_override=self.variants.get('email_override', '')),
                                key=lambda e:e[0]))
         jspfx = "        "
         jobset = '\n'.join(
@@ -2202,7 +2204,8 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                   ('project jobset nix expr', self.exprpath(False), [jobset]))
 
 
-    def job_variants(self, project_inputs, repo_branch=None, branch_list=None):
+    def job_variants(self, project_inputs, repo_branch=None, branch_list=None,
+                     email_override=None):
         def jobvar_rec(jspec, rem_vnames):
             if not rem_vnames:
                 vassoclist = sorted(jspec.items(), key=lambda e:e[0])
@@ -2217,6 +2220,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                             nixexprinput = "projectbld",
                             nixexprpath = self.project_file,
                             nixpkgs_version = jspec.get('nixpkgs_version', 'nixos-unstable'),
+                            emailoverride=email_override,
                             inputs = join_dicts(
                                 { "projectbld": {   # careful reference to the "projectbld" job decl
                                     "type": "build",
@@ -2248,7 +2252,8 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
             for vval in self.variants[vname]:
                 yield from jobvar_rec(join_dicts(jspec, {vname: vval}), rem_vnames[1:])
 
-        special_variants = ['proj_reposerver', 'repo_branch', 'distributions']
+        special_variants = ['proj_reposerver', 'repo_branch', 'distributions',
+                            'email_override']
         # The repo_branch specifies the various source branches that
         # should be built as part of the CI build process.  These
         # branches may or may not be the same as the primary project
