@@ -44,8 +44,9 @@ class Settable(object):
 
 class Project(object):
     "Specifies the name of the project being declared"
-    def __init__(self, name):
+    def __init__(self, name, allowUnfree=None):
         self.name = name
+        self.allowUnfree = allowUnfree
 
 class Base_Location(object): pass
 
@@ -1597,6 +1598,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     self.send(self.cipkg, each)
                 if self.ciproj:
                     self.send(self.ciproj, each)
+                if each.allowUnfree:
+                    self.send(self.summarygen, 'allowUnfree')
                 continue
             elif isinstance(each, StandardPackage):
                 # Each package can come from the standard packaging tool
@@ -2008,7 +2011,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # for tagalong nix files).
                    "          here= $out \\",
                    "          $src= $out \\",
-                   "          --static --nolocal --allowUnfree",
+                   "          --static --nolocal",
                    '        mkdir $out',
                    '        cp --reflink=auto $src/*.nix $out/;',
                    '        cp --reflink=auto --remove-destination *.nix $out/;',
