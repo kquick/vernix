@@ -2149,7 +2149,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
             gitval_val(self.packages[p], revbr, brlist))
         project_inputs = lambda revbr, brlist: OrderedDict(sorted(
             { p + '-src' : { "type": "git",
-                             "value": "%s %s 0" % gitval(p, revbr, brlist),
+                             "value": "%s %s" % gitval(p, revbr, brlist),
                              "emailresponsible": EMAILRESPONSIBLE,
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
