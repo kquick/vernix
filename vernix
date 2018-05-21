@@ -1994,6 +1994,8 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '             -o hackage/01-index.tar.gz \\',
                    '             https://hackage.haskell.org/01-index.tar.gz',
                    '        gunzip  hackage/01-index.tar.gz || mv hackage/01-index.tar.gz hackage/01-index.tar',
+                   '        mkdir $out',
+                   '        cd $out',
                    '        python3 $vernix/bin/vernix $src/%s --noisy \\' %
                             self.projdef_filepath(os.path.basename(self.input_path)),
                    # Provide local sources for inputs for cabal2nix
@@ -2020,9 +2022,8 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    "          here= $out \\",
                    "          $src= $out \\",
                    "          --static --nolocal",
-                   '        mkdir $out',
-                   '        cp --reflink=auto $src/*.nix $out/;',
-                   '        cp --reflink=auto --remove-destination *.nix $out/;',
+                   "        (cd $src; find . -name '*.nix' -exec cp --reflink=auto --parents {} $out/ \;)",
+                   # '        cp --reflink=auto --remove-destination *.nix $out/;',
                    "      '';",
                    "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix cacert curl gzip ];",
                    '    src = %s;' % (self.projdef_filepath() or './.'),
