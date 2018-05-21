@@ -1951,9 +1951,16 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
            len(self.packages) == self.num_gitrefs:
             self.generate_vernix_run()
 
+    def projdef_filepath(self, fname=None):
+        if fname is None:
+            # Path to root
+            return os.path.join(*tuple(['..']*(len(os.path.split(self.gitremote.local_subpath))-1) + ['.']))
+        # Root path to file
+        return os.path.join(self.gitremote.local_subpath, fname)
+
     def output_filepath(self, root_relative=False):
         if root_relative:
-            return os.path.join(self.gitremote.local_subpath, 'vernix-run.nix')
+            return self.projdef_filepath('vernix-run.nix')
         return 'vernix-run.nix'
 
     def jobname(self):
@@ -1987,7 +1994,8 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '             -o hackage/01-index.tar.gz \\',
                    '             https://hackage.haskell.org/01-index.tar.gz',
                    '        gunzip  hackage/01-index.tar.gz || mv hackage/01-index.tar.gz hackage/01-index.tar',
-                   '        python3 $vernix/bin/vernix $src/%s --noisy \\' % self.input_path,
+                   '        python3 $vernix/bin/vernix $src/%s --noisy \\' %
+                            self.projdef_filepath(os.path.basename(self.input_path)),
                    # Provide local sources for inputs for cabal2nix
                    # generation of nix specifications; if cabal2nix is
                    # provided with the Repository address, it will try
@@ -2017,7 +2025,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '        cp --reflink=auto --remove-destination *.nix $out/;',
                    "      '';",
                    "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix cacert curl gzip ];",
-                   '    src = ./.;',
+                   '    src = %s;' % (self.projdef_filepath() or './.'),
                    '    inherit vernix ' + ' '.join([i + '-src' for i in inputs]) + ';',
                    '  };',
                    '',
