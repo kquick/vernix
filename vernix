@@ -2091,18 +2091,23 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         self.send(self.vernix_run, gitremote)
 
     def receiveMsg_GitRefWithLclSrc(self, lclgitref, sender):
+        # Initially supplied by the main coordinator, but
+        # supplementally provided by GitBranchRef for cbi_variant
+        # repo_branch lookups.
+        self._add_gitref(lclgitref.gitref.name, lclgitref)
+
+    def _add_gitref(self, name, gitref):
         if not hasattr(self, 'packages'):
             self.packages = {}
-        self.packages[lclgitref.gitref.name] = lclgitref
-        self.send(self.vernix_run, lclgitref)
+        self.packages[name] = gitref
+        self.send(self.vernix_run, gitref)
         self.check_done()
 
     def receiveMsg_GitRef(self, gitref, sender):
-        if not hasattr(self, 'packages'):
-            self.packages = {}
-        self.packages[gitref.name] = gitref
-        self.send(self.vernix_run, gitref)
-        self.check_done()
+        # Initially supplied by the main coordinator, but
+        # supplementally provided by GitBranchRef for cbi_variant
+        # repo_branch lookups.
+        self._add_gitref(gitref.name, gitref)
 
     def receiveMsg_Error(self, errmsg, sender):
         if hasattr(self, 'project_decl_actor'):
