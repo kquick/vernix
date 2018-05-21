@@ -2456,6 +2456,7 @@ def gen_nix(filename=None, static=False, hydra=False, nolocal=False,
     if not os.path.exists(fname):
         sys.stderr.write('Cannot open input file: %s\n' % fname)
         return 5
+    os.environ['VERNIX_INPUT_FILE'] = fname
 
     print('Generating nix specifications from',fname,'...')
     gni = asys.createActor(GenerateNixInfo)
