@@ -1452,6 +1452,8 @@ class ReadPackageSpec(ActorTypeDispatcher):
         input_context = { key: globals()[key]
                           for key in globals()
                           if key in Specification_Classes }
+        input_context.update({'VERNIX_INPUT_FILE': inpfrom.filename})
+
         try:
             package_spec = eval(open(package_file, 'r').read())
         except SyntaxError:
@@ -2465,7 +2467,6 @@ def gen_nix(filename=None, static=False, hydra=False, nolocal=False,
     if not os.path.exists(fname):
         sys.stderr.write('Cannot open input file: %s\n' % fname)
         return 5
-    os.environ['VERNIX_INPUT_FILE'] = fname
 
     print('Generating nix specifications from',fname,'...')
     gni = asys.createActor(GenerateNixInfo)
