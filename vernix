@@ -2024,7 +2024,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    "          here= $out \\",
                    "          $src= $out \\",
                    "          --static --nolocal",
-                   "        (cd $src; find . -name '*.nix' -exec cp --reflink=auto --parents {} $out/ \;)",
+                   "        (cd $src; find . -name '*.nix' -exec cp --reflink=auto --parents --no-preserve=mode {} $out/ \;)",
                    # '        cp --reflink=auto --remove-destination *.nix $out/;',
                    "      '';",
                    "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix cacert curl gzip ];",
