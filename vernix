@@ -1987,15 +1987,15 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '    phases = [ "installPhase" ];',
                    '    installPhase =',
                    "      ''",
-                   '        set -x',
+                   '        set -xe',
+                   '        mkdir $out',
+                   '        cd $out',
                    '        mkdir hackage',
                    '        curl --cacert ${cacert}/etc/ssl/certs/ca-bundle.crt \\',
                    '             --compressed \\',
                    '             -o hackage/01-index.tar.gz \\',
                    '             https://hackage.haskell.org/01-index.tar.gz',
                    '        gunzip  hackage/01-index.tar.gz || mv hackage/01-index.tar.gz hackage/01-index.tar',
-                   '        mkdir $out',
-                   '        cd $out',
                    '        python3 $vernix/bin/vernix $src/%s --noisy \\' %
                             self.projdef_filepath(os.path.basename(self.input_path)),
                    # Provide local sources for inputs for cabal2nix
