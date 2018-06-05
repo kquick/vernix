@@ -116,7 +116,7 @@ class HaskellPackage(StandardPackage):
     "Specify a Haskell package"
     def __init__(self, name, *args, version=None, dontCheck=False,
                  jailBreak=False, dontHaddock=False,
-                 dontProfile=False,
+                 dontProfile=True,
                  extraLibraries=None):
         super(HaskellPackage, self).__init__(name, version, *args)
         self.dontCheck = dontCheck
