@@ -23,7 +23,7 @@ from datetime import datetime
 import urllib.parse
 import tempfile
 
-EMAILRESPONSIBLE = True
+EMAILRESPONSIBLE = False
 
 class Settable(object):
     def __call__(self, **kw):
@@ -87,10 +87,11 @@ class Base_PackageIdent(object):
         self.version = version
 
 class StandardPackage(Base_PackageIdent):
-    def __init__(self, name, version=None, *args):
+    def __init__(self, name, version=None, *args, **kw):
         super(StandardPackage, self).__init__(name, version)
         self.repo_location = None
         self.local_location = None
+        self.email_responsible = kw.get('email_responsible', EMAILRESPONSIBLE)
         self._process_args(*args)
     def _process_args(self, *args):
         for arg in args:
@@ -117,8 +118,8 @@ class HaskellPackage(StandardPackage):
     def __init__(self, name, *args, version=None, dontCheck=False,
                  jailBreak=False, dontHaddock=False,
                  dontProfile=False,
-                 extraLibraries=None):
-        super(HaskellPackage, self).__init__(name, version, *args)
+                 extraLibraries=None, **kw):
+        super(HaskellPackage, self).__init__(name, version, *args, **kw)
         self.dontCheck = dontCheck
         self.jailBreak = jailBreak
         self.dontHaddock = dontHaddock
