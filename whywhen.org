@@ -1,0 +1,245 @@
+* Why or When should I use vernix?
+
+** I'm building a simple project, very few dependencies, cabal works fine.
+
+    Cool!  Carry on.
+
+** I'm building a project with nix+cabal2nix+cabal, few dependencies, works fine.
+
+    Looking good, stay simple.
+
+** I'm using cabal2nix, but cabal doesn't like the version of a dependency.
+
+    #+BEGIN_EXAMPLE
+    $ cat > myproject.vx2 << EOF
+    Project('myproject')
+    HaskellPackage('dependency', '0.9.1.3')
+    EOF
+    $ vernix
+    $ cat > shell.nix << EOF
+    { ghcver ? 'ghc822'}:
+    (import ./myproject-project.nix { inherit ghcver; }).myproject.env
+    EOF
+    $ nix-shell
+    nix-shell$ cabal ...
+    #+END_EXAMPLE
+
+** I'm using cabal2nix, but I need a dependency from github, not Hackage
+
+    #+BEGIN_EXAMPLE
+    $ cat > myproject.vx2 << EOF
+    Project('myproject')
+    HaskellPackage('dependency', RepoIdent(team='bestcoders', reponame='deplib'))
+    EOF
+    $ vernix
+    $ cat > shell.nix << EOF
+    { ghcver ? 'ghc822'}:
+    (import ./myproject-project.nix { inherit ghcver; }).myproject.env
+    EOF
+    $ nix-shell
+    nix-shell$ cabal ...
+    #+END_EXAMPLE
+
+    Note that any package that you do not explicitly specify in your
+    vx2 file will be obtained from the standard nixpkgs specification.
+    If nixpkgs knows about the package, and if the version it supplies
+    is fine, then you don't need to explicitly add the package into
+    the vx2 file.
+
+** I'm using cabal2nix, but I need a branch/revision dependency from github, not Hackage
+
+    #+BEGIN_EXAMPLE
+    $ cat > myproject.vx2 << EOF
+    Project('myproject')
+    HaskellPackage('dependency1', 'devel-branch', RepoIdent(team='bestcoders', reponame='deplib'))
+    HaskellPackage('dependency2', '9fa3a11', RepoIdent(team='maxcoders', reponame='fancylib'))
+    EOF
+    $ vernix
+    $ cat > shell.nix << EOF
+    { ghcver ? 'ghc822'}:
+    (import ./myproject-project.nix { inherit ghcver; }).myproject.env
+    EOF
+    $ nix-shell
+    nix-shell$ cabal ...
+    #+END_EXAMPLE
+
+** I checked out and am modifying a dependency as well as the main project:
+
+    #+BEGIN_EXAMPLE
+    $ cat > myproject.vx2 << EOF
+    Project('myproject')
+    HaskellPackage('dependency1', 'devel-branch',
+                   RepoIdent(team='bestcoders', reponame='deplib'),
+                   Local('../localdep3'))
+    EOF
+    $ vernix
+    $ cat > shell.nix << EOF
+    { ghcver ? 'ghc822'}:
+    (import ./myproject-project.nix { inherit ghcver; }).myproject.env
+    EOF
+    $ nix-shell
+    nix-shell$ cabal ...
+    #+END_EXAMPLE
+
+    Note that when both the RepoIdent and the Local are specified, the
+    Local takes precedence, but is ignored when it is removed.  This
+    allows nix to provide the dependency from a local source (even if
+    it's normally available via a git submodule, this is an override
+    alternative).
+
+    The Local precedence+ignore behavior can be particularly handy
+    when the top-level project uses git submodules:
+
+    Start my dev:
+    #+BEGIN_EXAMPLE
+    $ git clone myproject...
+    $ cd myproject
+    $ cat > myproject.vx2 << EOF
+    Project('myproject')
+    HaskellPackage('dependency1', 'devel-branch',
+                   RepoIdent(team='bestcoders', reponame='deplib'),
+                   Local('./submodules/deplib'))
+    EOF
+    $ vernix
+    $ cat > shell.nix << EOF
+    { ghcver ? 'ghc822'}:
+    (import ./myproject-project.nix { inherit ghcver; }).myproject.env
+    EOF
+    $ nix-shell
+    nix-shell$ cabal ...
+    #+END_EXAMPLE
+
+    Decide I want to make modifications to deplib as well:
+    #+BEGIN_EXAMPLE
+    $ git submodule init submodules/deplib
+    $ git submodule update submodules/deplib
+    $ vernix
+    $ nix-shell
+    #+END_EXAMPLE
+
+    Finished with the deplib modifications, but still working on the main project:
+    #+BEGIN_EXAMPLE
+    $ cd submodules/deplib
+    $ git commit ...
+    $ git push
+    $ cd -
+    $ git submodules deinit submodules/deplib
+    $ rm -rf submodules/deplib
+    $ vernix
+    $ nix-shell
+    #+END_EXAMPLE
+
+    Now deplib is coming from the git repo again.
+
+* Usage FAQ
+
+** I'm doing the above, but not sure what the "--static" flag means.
+
+    The vernix "--static" and "--dynamic" command-line flags determine
+    when the source is fetched from remote git repos.  
+
+    In static mode, the source is fetched when ~vernix~ runs: the
+    result is a consistent ~-project.nix~ file that always references
+    the same sources, even if new commits are pushed to the remote
+    repo.
+
+    In dynamic mode, the source is fetched each time ~nix-build~, or
+    ~nix-shell~ is run.  This will make these commands somewhat
+    slower, but will ensure that the latest remote sources are
+    obtained each time they are run.  Note that this mode cannot be
+    used in "restricted" nix mode (Hydra runs in restricted mode, and
+    always uses ~--static~).
+
+** How often do I need to run vernix?
+
+  | Changed to be incorporated     | --static (default) | --dynamic | Re-run nix-shell |
+  |--------------------------------+--------------------+-----------+------------------|
+  | Modify the vx2 file            | yes                | yes       | yes              |
+  | Get new remote (github) change | yes                |           | yes              |
+  | Changes in a Local dependency  |                    |           | yes              |
+
+
+** What happens when I run vernix?  (git fetches v.s. builds)
+
+  Vernix will process each package, looking first for the package in
+  the specified Local location (if any), and then from the RepoIdent
+  location, and finally assuming that it comes from the standard
+  package repository (e.g. Hackage).
+
+  Vernix will generate a nix build specification for each package from
+  the specified source location, often using helpers (e.g. cabal2nix).
+
+  Vernix will write a ~-project.nix~ file that contains all of the
+  build specifications as overrides/additions to the standard nixpkg
+  specifications, as well as some usage instructions at the end.  It
+  will optionally generate Hydra build information.
+
+** I have updated a Local dependency...
+
+  If you are working on ProjectA, which depends on ProjectB, and you
+  have both checked out locally and referenced by a Local
+  specification, and you have made changes in ProjectB that you want
+  visible in ProjectA, how do you do it?
+
+  #+BEGIN_EXAMPLE
+  ~/dev/ProjectB $ edit
+  [make some changes]
+  ~/dev/ProjectB $ nix-shell
+  [nix-shell:~/dev/ProjectB]$ cabal build
+  [everything looks good, you now want to use these changes in ProjectA]
+  [nix-shell:~/dev/ProjectB]$ exit
+  ~/dev/ProjectB $ cd ../ProjectA
+  ~/dev/ProjectB $ nix-shell
+  [sees changes in ~/dev/ProjectB and copies them to /nix/store/...]
+  [rebuilds a new ProjectB in /nix/store]
+  [nix-shell:~/dev/ProjectA]$ cabal clean
+  #+END_EXAMPLE
+
+  This is a fairly standard process, except for a couple of notable elements:
+
+  * If you already had a nix-shell open in ProjectA, the ProjectB
+    dependency points to the last build in ~/nix/store~, and *not* to
+    the ~dev/ProjectB~ directory where your newest changes are.  You
+    must exit any existing ~nix-shell~ environment and re-issue the
+    ~nix-shell~ (or ~nix-build~) to get the updated ProjectB rebuild
+    into the ~/nix/store~ and available for ProjectA.
+
+  * The cabal tool is unaware of the new ProjectB build in the
+    ~/nix/store~, so anything previously built into ProjectA's ~dist~
+    output directory will not be updated. The safest way to manage
+    this is to use ~cabal clean~ in ProjectA to ensure that cabal sees
+    the new ProjectB build in the ~/nix/store~ location.
+
+** I need to use a private github/gitlab repo
+
+   You can use vernix for these, but there are a couple of additional steps.
+
+   1. Use the ssh repo access methodology, not the https access method.
+
+   2. Ensure you have an ssh-agent running and loaded with the keys
+      you need to access the private repo.
+
+   3. Always run vernix with the ~--static~ flag (the default).  This
+      ensures that any fetches from the private repo are performed
+      during the ~vernix~ run when the local ssh-agent is available to
+      respond to permissions challenges.  When running
+      nix-shell/nix-build/nix-env, those usually run via a
+      ~nix-buildN~ alternate process, which will *not* have access to
+      your locally running ssh-agent and therefore cannot pull the
+      sources from the remote repository.
+
+   4. The use of the ~--fast~ flag with private repositories is not
+      recommended: the ssh-agent doesn't seem to handle simultaneous
+      challenge sessions well, and the ~vernix~ run will fail with
+      strange and non-deterministic errors.  Running without the
+      ~--fast~ flag will take a little longer, but should be
+      deterministically successful.
+ 
+   5. If you are using ~--hydra~, then the RepoIdent for the private
+      repository will need to use a specific name for the remote
+      server.  The hydra user on the Hydra system will need the
+      .ssh/config file to specify that hostname with a translation to
+      the actual remote repository and a specification of which
+      identify file (private key) to use to allow Hydra to access the
+      private repository.  That private key should not have a
+      passphrase to allow it to be used in batch mode.

@@ -5,35 +5,47 @@ This is a tool to generate nix expressions for packages with specific versions.
 ** Usage
 
   1. Download the vernix file and make sure the executable bit is set.
-  2. Create a ~package_spec~ describing the override packages you
-     need.  Use ~$ vernix --help~ to get information on how to create
-     the ~package_spec~.
+     - This script is designed to use nix-shell, which assumes that
+       you need have nix installed.  This is judged to be a safe
+       assumption, since the output and purpose of this tool is
+       creating nix specifications.
+  2. Create a ~FILE.vx2~ (or a ~package_spec~ file) describing the
+     override packages you need.  Use ~$ vernix --help~ to get
+     information on how to create the input package specification.
   3. Run ~$ vernix~ to get a ~...-project.nix~ file.
   4. Follow the instructions in the comments at the end of that project.nix file.
   5. Optionally use additional arguments (e.g. ~--fast~).
+
+  Note that because vernix is preparing elements for the nix build
+  tools, it must be run in an environment where those tools are
+  available.
 
 ** Hydra Usage
 
   The vernix tool can also be used to help configure the [[https://nixos.org/hydra][Hydra
   continuous build system]].  For more information, see [[HydraUsage.org]].
 
-*** Notes
+** Notes
 
-[[https://git.io/vx4pk][An example ~package_spec~]] for building the Matterhorn client for
+[[https://git.io/vx4pk][An example ~package_spec~] for building the Matterhorn client for
 Mattermost.  This client is written in Haskell.  The client itself is
 loaded from github and there are some specific Haskell package version
 overrides.
 
-The default project.nix file generated will automatically check the
-source locations each time a nix evaluation is performed
-(e.g. ~nix-shell~ or ~nix-build~) and therefore update to any recent
-changes for packages not pinned to a specific version.
+The default project.nix file will either be frozen to the versions
+available at the time ~vernix~ created it (if ~--static~ is used), or
+it will automatically check the source locations each time a nix
+evaluation is performed (e.g. ~nix-shell~ or ~nix-build~) and
+therefore update to any recent changes for packages not pinned to a
+specific version.
 
 It is only necessary to re-run ~vernix~ if the ~package_spec~ input
 changes or to update for new upstream ~nixpkgs~ changes.
 
+-----
 
-** Background
+** Design Information
+*** Background
 
 The nixpkgs set of tools and package descriptions are a great way to
 do controlled, reproducable development and product maintenance, but
@@ -51,7 +63,7 @@ incompatibility with multiple necessary clients is there a specific
 version of a package created, and the version is embedded in the
 package name.
 
-** Problem Statement
+*** Problem Statement
 
 It should be possible to develop and/or install something with an
 explicit set of versioned dependencies.  The versioning of the
@@ -71,49 +83,85 @@ As another side effect, it should become easier to run different
 versions of the target language environment for testing (e.g. GHC 7.10
 v.s. 8.0.2 v.s. 8.2.2, or rust stable v.s. nightly).
 
-*** nixpkgs/overlays
+**** nixpkgs/overlays
 
 This is a nice way of creating specific sets of overlays and managing
 them separately.  Unfortunately, they are *all* applied for a
 particular nix operation, so different packages with conflicting
 version requirements will still have problems.
 
-This ultimately is not a good solution.  A better solution is one in
-which the dependencies tend toward the default installed versions, but
-which can be explicitly overloaded, but only for building that package
-and its dependency set.
+This ultimately is not a good solution if you are looking for
+per-project variations.  A better solution is one in which the
+dependencies tend toward the default installed versions, but which can
+be explicitly overloaded, but only for building that package and its
+dependency set.
 
-** Solution
 
-Build a specific foo-project.nix file which contains overlay
+*** Solution
+
+Build a specific foo-project.nix file which contains explicit nix
 specifications that are only applied when running that file.  All
-nix-shell operations will utilize that file to obtain the configuration.
+nix-shell/nix-env operations will utilize that file to obtain the
+configuration.
 
-Create a tool to build that file as needed.
+Create a tool to build that file as needed: ~vernix~.
 
 The current primary language environment target is Haskell/cabal,
 although other language should be possible to support.
 
-** Notes regarding other Solutions
+**** Notes regarding other Solutions
 
-*** stack
+   | :           \    Tool-->  | vernix | cabal | cabal-new | stack | styx      | cabal2nix | nix      | git        |
+   | v Feature    \            |        |       | cabal 2   |       |           |           | packages | submodules |
+   |---------------------------+--------+-------+-----------+-------+-----------+-----------+----------+------------|
+   | Local Build               | *      | *     | *         | *     | *         | *         | *        | *          |
+   | Multi-package Local Build | *      |       | *         |       | *         |           | *        | *          |
+   | Git references            | *      |       |           |       | *         | *         |          | *          |
+   | Hackage references        | *      | *     | *         |       |           | *         |          |            |
+   | Explicit versions         | *      |       | *         | *     | *         |           |          |            |
+   | Non-Haskell packages      | *      |       |           |       | *         |           | *        |            |
+   | Compiler variants         | *      |       |           | *     | *         |           | *        |            |
+   | Package Caches            | global |       | directory | user  | directory | global    | global   |            |
+   | CB/CI integration         | Hydra  |       |           |       |           |           |          |            |
+   | Efficient Builds          | *      |       |           |       |           |           | *        |            |
+   | Shareable                 | *      |       |           |       |           | *         | *        |            |
 
-This is a non-standard  tool, and Haskell-only.
+     * Efficient Builds :: means that build artifacts from previous
+          builds can be *safely* re-used in new builds, and that
+          builds only generate the minimal set of operations needed
+          relative to the previous builds.
 
-*** cabal new
+     * Shareable :: means that the build output can be re-used by
+                    other projects, and other people on other
+                    machines.
+
+***** stack
+
+This is a non-standard tool, and Haskell-only.
+
+***** styx
+
+Similar to vernix:
+   * Does not provide Hydra output
+   * The input file is yaml.  This may be more "declarative" than
+     vernix's Python input, but also requires more duplication.
+   * Less per-project control (e.g. per-project additional
+     dependencies, build flag control such as noCheck, etc.).
+
+***** cabal new
 
 Based on the nix principles, and works fairly well for haskell
 packages, but does not extend to OS-level packages needed (e.g. zip).
 
 Also, this tool is still under development and is incomplete at this time.
 
-*** cabal2nix
+***** cabal2nix
 
 Good to translate cabal files to nix files, but all dependencies are
 specified without versioning, so there must be nix mappings to any
 specific versions required.
 
-*** Exiting nix infrastructure
+***** Existing nix infrastructure
 
 The haskell package infrastructure is missing a couple of key elements
 (e.g. cabal2nix subpath) and doesn't handle sub-versions too well.
@@ -121,8 +169,10 @@ It's also not convenient when working with packages that are not part
 of the standard nixpkgs distribution (either local packages or
 packages newer than what has been incorporated into the distribution).
 
-*** git submodules
+***** git submodules
 
 Not useable outside of git.  Very complicated, with extra management
-needed.  Doesn't work for non-git modules.
+and setup/checkout needed.  Doesn't work for non-git modules, and only
+useful for building from source, not for specifying specific external
+packaging versioning.
 
