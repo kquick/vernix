@@ -2541,7 +2541,7 @@ def gen_nix(filename=None, static=False, hydra=False, nolocal=False,
 if __name__ == "__main__":
     if '-h' in sys.argv or '--help' in sys.argv:
         print('''Usage: %s [--help] [--fast] [--noisy] [--allowUnfree]
-                           [--daily] [--hourly] [--static] [input-file]
+                           [--daily] [--hourly] [--static|--dynamic] [input-file]
                            [name: path]
 
 Tool to read the package_spec file and generate a nix specification.
@@ -2619,7 +2619,9 @@ to this is that any changes in the available input cabal files
 nix requirements and therefore the build configuration is kept more
 current for a local development environment (although it is also
 slower to enter a nix-shell or nix-build since each cabal2nix is
-re-evaluated at that time).
+re-evaluated at that time).  The --static mode is the default, and
+--dynamic specifies the opposite mode; if both are specified, the
+--static mode is used.
 
 Source location references and overrides can be supplied on the
 command-line.  An override specifies a location to use *instead* of
@@ -2678,7 +2680,7 @@ additional package set downloads and storage in the nix store.
                                    + [None])[0],
                          noisy='--noisy' in argv,
                          allowUnfree='--allowUnfree' in argv,
-                         static='--static' in argv,
+                         static='--static' in argv or '--dynamic' not in argv,
                          hydra='--hydra' in argv,
                          nolocal='--nolocal' in argv,
                          overrides=overrides,
