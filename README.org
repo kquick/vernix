@@ -20,6 +20,7 @@ This is a tool to generate nix expressions for packages with specific versions.
   tools, it must be run in an environment where those tools are
   available.
 
+
 ** Hydra Usage
 
   The vernix tool can also be used to help configure the [[https://nixos.org/hydra][Hydra
@@ -27,7 +28,7 @@ This is a tool to generate nix expressions for packages with specific versions.
 
 ** Notes
 
-[[https://git.io/vx4pk][An example ~package_spec~] for building the Matterhorn client for
+[[file:examples/matterhorn.vx2][An example package spec]] for building the Matterhorn client for
 Mattermost.  This client is written in Haskell.  The client itself is
 loaded from github and there are some specific Haskell package version
 overrides.
@@ -41,6 +42,10 @@ specific version.
 
 It is only necessary to re-run ~vernix~ if the ~package_spec~ input
 changes or to update for new upstream ~nixpkgs~ changes.
+
+** More information
+
+   [[whywhen.org][Why and When you might use vernix]]
 
 -----
 
