@@ -4,6 +4,8 @@
 # or specific versions than those available in the standard
 # nixos-unstable nixpkgs channel.
 
+# Note: this file is in Python syntax.
+
 github = RepoIdent(team='matterhorn-chat')  # A helper supplying defaults
 
 package_spec = [

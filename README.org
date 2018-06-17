@@ -12,6 +12,7 @@ This is a tool to generate nix expressions for packages with specific versions.
   2. Create a ~FILE.vx2~ (or a ~package_spec~ file) describing the
      override packages you need.  Use ~$ vernix --help~ to get
      information on how to create the input package specification.
+     The file is in Python syntax.
   3. Run ~$ vernix~ to get a ~...-project.nix~ file.
   4. Follow the instructions in the comments at the end of that project.nix file.
   5. Optionally use additional arguments (e.g. ~--fast~).
@@ -34,11 +35,11 @@ loaded from github and there are some specific Haskell package version
 overrides.
 
 The default project.nix file will either be frozen to the versions
-available at the time ~vernix~ created it (if ~--static~ is used), or
-it will automatically check the source locations each time a nix
-evaluation is performed (e.g. ~nix-shell~ or ~nix-build~) and
-therefore update to any recent changes for packages not pinned to a
-specific version.
+available at the time ~vernix~ created it (by default or if ~--static~
+is used), or it will automatically check the source locations each
+time a nix evaluation is performed (e.g. ~nix-shell~ or ~nix-build~)
+when ~--dynamic~ is used.  and therefore update to any recent changes
+for packages not pinned to a specific version.
 
 It is only necessary to re-run ~vernix~ if the ~package_spec~ input
 changes or to update for new upstream ~nixpkgs~ changes.
