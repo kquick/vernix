@@ -355,11 +355,18 @@ class GitBranchRef(ActorTypeDispatcher):
                                                  cbi_reporef=cbi_reporef,
                                                  subpath=cmdres.command.reqmsg.repo_location.subpath))
         elif len(match) > 1:
-            self.send(self.requestor,
-                      Error((name,
-                            'Multiple matches for branch %s in repo %s: %s' %
-                             (branch, reporef, match)),
-                            'GitBranchRef multiple matches'))
+            m = list(filter(lambda x: x.strip().endswith(' refs/heads/' + branch), match)) + \
+                list(filter(lambda x: x.strip().endswith('\trefs/heads/' + branch), match))
+            if len(m) == 1:
+                self.send(self.requestor, GitRef(name=name, branch=branch, ref=m[0].split('\t')[0],
+                                                 reporef=reporef, cbi_reporef=cbi_reporef,
+                                                 subpath=cmdres.command.reqmsg.repo_location.subpath))
+            else:
+                self.send(self.requestor,
+                          Error((name,
+                                 'Multiple matches for branch %s in repo %s: %s' %
+                                 (branch, reporef, match)),
+                                'GitBranchRef multiple matches'))
         else:
             self.send(self.requestor, GitRef(name=name, branch=branch, ref=match[0].split('\t')[0],
                                              reporef=reporef, cbi_reporef=cbi_reporef,
