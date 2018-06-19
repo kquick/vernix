@@ -1168,9 +1168,9 @@ class StandardPackage_MixIn(object):
 
     def package_ref_StandardPackage(self, package, systems=None):
         if systems:
-            return ('    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system:'
+            return ('    %(package_name)s = rlslib.forAllSystems (system:'
                     '                           let pkgs = rlslib.pkgsFor system; in'
-                    '                           pkgs.%(package_name)s);'
+                    '                           pkgs.%(package_name)s.${system});'
                     % package.__dict__ % nixstrlist(systems))
         return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
 
@@ -1203,9 +1203,9 @@ class HaskellPackage_MixIn(object):
 
     def package_ref_HaskellPackage(self, package, systems=None):
         if systems:
-            return ('    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system:\n'
+            return ('    %(package_name)s = forAllSystems (system:\n'
                     '                           let pkgs = rlslib.pkgsFor system; in\n'
-                    '                           pkgs.haskell.packages.${ghcver}.%(package_name)s);'
+                    '                           pkgs.haskell.packages.${ghcver}.%(package_name)s.${system});'
                     % package.__dict__ % { 'systems': nixstrlist(systems) })
         return '    %(package_name)s = pkgs.haskell.packages.${ghcver}.%(package_name)s;' \
             % package.__dict__
