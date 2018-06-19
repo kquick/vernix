@@ -1170,7 +1170,7 @@ class StandardPackage_MixIn(object):
         if systems:
             return ('    %(package_name)s = rlslib.forAllSystems (system:'
                     '                           let pkgs = rlslib.pkgsFor system; in'
-                    '                           pkgs.%(package_name)s.${system});'
+                    '                           pkgs.%(package_name)s);'
                     % package.__dict__ % nixstrlist(systems))
         return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
 
@@ -1189,6 +1189,8 @@ class StandardPackage_MixIn(object):
                     '',
                     '  rlslib = import <nixpkgs/pkgs/top-level/release-lib.nix> {',
                     '               supportedSystems = ' + nixstrlist(systems) + ';',
+                    '               packageSet = import nixpkgs;',
+                    '               nixpkgsArgs = { config = config; };',
                     '           };'
             ]:
                 yield each
@@ -1205,7 +1207,7 @@ class HaskellPackage_MixIn(object):
         if systems:
             return ('    %(package_name)s = rlslib.forAllSystems (system:\n'
                     '                           let pkgs = rlslib.pkgsFor system; in\n'
-                    '                           pkgs.haskell.packages.${ghcver}.%(package_name)s.${system});'
+                    '                           pkgs.haskell.packages.${ghcver}.%(package_name)s);'
                     % package.__dict__ % { 'systems': nixstrlist(systems) })
         return '    %(package_name)s = pkgs.haskell.packages.${ghcver}.%(package_name)s;' \
             % package.__dict__
