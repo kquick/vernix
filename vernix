@@ -1731,8 +1731,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 if self.cipkg:
                     self.send(self.cipkg, each)
                     self.send(self.ciproj, each)
-                    if 'systems' in each.variants:
-                        self.send(self.summarygen, ('systems', each.variants['systems']))
+                if 'systems' in each.variants:
+                    self.send(self.summarygen, ('systems', each.variants['systems']))
                 continue
             else:
                 raise RuntimeError("Unknown package type: %s %s"
