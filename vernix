@@ -1004,6 +1004,8 @@ class SummaryBase(ActorTypeDispatcher):
         self.allowUnfree = False
         self.static = False
         self.frequency = '%Y-w%W'
+        self.systems = None
+        self.output_for_hydra = False
         self.mixins = {}
 
     def receiveMsg_NixPackageSpec(self, pkgmsg, sender):
@@ -1047,12 +1049,18 @@ class SummaryBase(ActorTypeDispatcher):
         if strmsg == 'static':
             self.static = True
             return
+        if strmsg == 'output-for-hydra':
+            self.output_for_hydra = True
         # This is the filename to write, and is sent after all the
         # (Success) messages about individual packages.  Write out the
         # overlay file now.
         self.summary_fname = strmsg
         self.requestor = sender
         self._generate_summary_file_if_ready()
+
+    def receiveMsg_tuple(self, tmsg, sender):
+        if tmsg[0] == 'systems':
+            self.systems = tmsg[1]
 
     def _generate_summary_file_if_ready(self):
         # Determine if it is time to generate the summary file:
@@ -1148,16 +1156,21 @@ class OverlaySpec(SummaryBase):
 
 # --------------------
 
+nixstrlist = lambda l: '[ ' + ' '.join(['"'+S+'"' for S in l]) + ' ]'
+
 class StandardPackage_MixIn(object):
 
     def package_overrides_StandardPackage(self, package_list):
         pkgdef = lambda p: '      %s = p.callPackage %s {};' % (p.package.name, p.nix_source)
         return map(pkgdef, sorted(package_list))
 
-    def package_ref_StandardPackage(self, package):
+    def package_ref_StandardPackage(self, package, systems=None):
+        if systems:
+            return '    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system: let pkgs = rlslib.pkgsFor system in pkgs.%(package_name)s;' \
+                % package.__dict__ % systems
         return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
 
-    def kind_definitions_StandardPackage(self, is_static, frequency):
+    def kind_definitions_StandardPackage(self, is_static, frequency, systems=None):
         for each in [
             '  cleanupSource =',
             '    builtins.filterSource (path: type:',
@@ -1167,6 +1180,15 @@ class StandardPackage_MixIn(object):
         ]:
             yield each
 
+        if systems:
+            for each in [
+                    '',
+                    '  rlslib = import <nixpkgs/pkgs/top-level/release-lib.nix> {',
+                    '               supportedSystems = ' + nixstrlist(systems) + ';',
+                    '           };'
+            ]:
+                yield each
+
 
 class HaskellPackage_MixIn(object):
 
@@ -1175,7 +1197,10 @@ class HaskellPackage_MixIn(object):
             self._haskell_compilers = self.createActor(NixGHCCompilers)
             self.send(self._haskell_compilers, 'get')
 
-    def package_ref_HaskellPackage(self, package):
+    def package_ref_HaskellPackage(self, package, systems=None):
+        if systems:
+            return '    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system: let pkgs = rlslib.pkgsFor system in pkgs.haskell.packages.${ghcver}.%(package_name)s;);' \
+                % package.__dict__ % { 'systems': nixstrlist(systems) }
         return '    %(package_name)s = pkgs.haskell.packages.${ghcver}.%(package_name)s;' \
             % package.__dict__
 
@@ -1232,7 +1257,7 @@ class HaskellPackage_MixIn(object):
         clean_local_source = lambda s: '(cleanupSource %s)' % s
         return (clean_local_source(pkg.nix_source), 'null')
 
-    def kind_definitions_HaskellPackage(self, is_static, frequency):
+    def kind_definitions_HaskellPackage(self, is_static, frequency, systems=None):
         if not is_static:
             for each in [
                  '''
@@ -1361,14 +1386,19 @@ class ProjectConfig(SummaryBase):
 
         for kind in pkg_dict:
             yield ''
-            for line in self.call_mixin('kind_definitions', kind, (self.static, self.frequency)):
+            for line in self.call_mixin('kind_definitions', kind,
+                                        (self.static,
+                                         self.frequency,
+                                         self.systems if self.output_for_hydra else None)):
                 yield line
 
         yield ''
         yield 'in {'
 
         for pkg in sorted(self.nixpackage_list, key=lambda p: p.package_name):
-            yield self.call_mixin('package_ref', pkg.package.__class__.__name__, (pkg,))
+            yield self.call_mixin('package_ref', pkg.package.__class__.__name__,
+                                  (pkg,
+                                   self.systems if self.output_for_hydra else None))
 
         yield '}'
 
@@ -1585,6 +1615,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     self.send(self.summarygen, 'update:daily')
                 if static:
                     self.send(self.summarygen, 'static')
+                if self.nolocal:
+                    self.send(self.summarygen, 'output-for-hydra')
 
             if hydra:
                 self.cipkg = self.createActor(GenerateHydraJobsetDecl)
@@ -1693,6 +1725,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 if self.cipkg:
                     self.send(self.cipkg, each)
                     self.send(self.ciproj, each)
+                    if 'systems' in each.variants:
+                        self.send(self.summarygen, ('systems', each.variants['systems']))
                 continue
             else:
                 raise RuntimeError("Unknown package type: %s %s"
@@ -2286,7 +2320,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                 yield from jobvar_rec(join_dicts(jspec, {vname: vval}), rem_vnames[1:])
 
         special_variants = ['proj_reposerver', 'repo_branch', 'distributions',
-                            'email_override']
+                            'email_override', 'systems']
         # The repo_branch specifies the various source branches that
         # should be built as part of the CI build process.  These
         # branches may or may not be the same as the primary project
