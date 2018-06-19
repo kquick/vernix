@@ -1169,7 +1169,7 @@ class StandardPackage_MixIn(object):
     def package_ref_StandardPackage(self, package, systems=None):
         if systems:
             return ('    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system:'
-                    '                           let pkgs = rlslib.pkgsFor system in'
+                    '                           let pkgs = rlslib.pkgsFor system; in'
                     '                           pkgs.%(package_name)s;'
                     % package.__dict__ % nixstrlist(systems))
         return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
