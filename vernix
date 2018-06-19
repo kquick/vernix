@@ -1051,6 +1051,7 @@ class SummaryBase(ActorTypeDispatcher):
             return
         if strmsg == 'output-for-hydra':
             self.output_for_hydra = True
+            print('output_for_hydra')
         # This is the filename to write, and is sent after all the
         # (Success) messages about individual packages.  Write out the
         # overlay file now.
@@ -1061,6 +1062,7 @@ class SummaryBase(ActorTypeDispatcher):
     def receiveMsg_tuple(self, tmsg, sender):
         if tmsg[0] == 'systems':
             self.systems = tmsg[1]
+            print('systems',self.systems)
 
     def _generate_summary_file_if_ready(self):
         # Determine if it is time to generate the summary file:
@@ -1166,8 +1168,10 @@ class StandardPackage_MixIn(object):
 
     def package_ref_StandardPackage(self, package, systems=None):
         if systems:
-            return '    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system: let pkgs = rlslib.pkgsFor system in pkgs.%(package_name)s;' \
-                % package.__dict__ % systems
+            return ('    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system:'
+                    '                           let pkgs = rlslib.pkgsFor system in'
+                    '                           pkgs.%(package_name)s;'
+                    % package.__dict__ % nixstrlist(systems))
         return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
 
     def kind_definitions_StandardPackage(self, is_static, frequency, systems=None):
@@ -1199,8 +1203,10 @@ class HaskellPackage_MixIn(object):
 
     def package_ref_HaskellPackage(self, package, systems=None):
         if systems:
-            return '    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system: let pkgs = rlslib.pkgsFor system in pkgs.haskell.packages.${ghcver}.%(package_name)s;);' \
-                % package.__dict__ % { 'systems': nixstrlist(systems) }
+            return ('    %(package_name)s = pkgs.lib.genAttrs %%(systems)s (system:\n'
+                    '                           let pkgs = rlslib.pkgsFor system in\n'
+                    '                           pkgs.haskell.packages.${ghcver}.%(package_name)s;);'
+                    % package.__dict__ % { 'systems': nixstrlist(systems) })
         return '    %(package_name)s = pkgs.haskell.packages.${ghcver}.%(package_name)s;' \
             % package.__dict__
 
