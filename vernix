@@ -1,6 +1,6 @@
 #! /usr/bin/env nix-shell
 # -*- mode: python; -*-
-#! nix-shell -i "python3.6 -u" -p cabal2nix nix-prefetch-scripts haskell.compiler.ghc802 git "python36.withPackages(pp: with pp; [ thespian setproctitle ])"
+#! nix-shell -i "python3.6 -u" -p cabal2nix nix-prefetch-scripts haskell.compiler.ghc822 git "python36.withPackages(pp: with pp; [ thespian setproctitle ])"
 
 # n.b. to add fancy progress bars, add both blessings and progressive
 # to the packages list above, but note that progressive is not
@@ -1426,7 +1426,7 @@ class ProjectConfig(SummaryBase):
                 '#   $ git clone %s' % sample_pkgname,
                 '#   $ cd %s' % sample_pkgname,
                 '#   $ cat > shell.nix << EOF',
-                '#   { ghcver ? "ghc802" }:',
+                '#   { ghcver ? "ghc822" }:',
                 '#   (import %s { inherit ghcver; }).%s.env' % (
                     os.path.join(os.getcwd(), project_fname), sample_pkgname),
                 '#   EOF',
