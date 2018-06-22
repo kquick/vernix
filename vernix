@@ -1796,16 +1796,23 @@ class GenerateNixInfo(ActorTypeDispatcher):
             gitrefmsg = GitRefWithLclSrc(gitrefmsg,
                                          self.location_references[gitrefmsg.name])
         gitrefmsg.noisily = self.noisy
-        if self.cipkg:
-            self.send(self.cipkg, gitrefmsg)
         # If local was allowed, then use that location and this gitref
         # is just for the cipkg Hydra output, otherwise this is the
         # location to use for the local project as well.
-        for each in filter(lambda p:
-                           isinstance(p, StandardPackage) and p.name == name,
-                           self.package_spec):
-            if self.nolocal or not each.local_location:
-                self.send(self.c2nr, gitrefmsg)
+        pkgsforref = list(filter(lambda p:
+                                 isinstance(p, StandardPackage) and p.name == name,
+                                 self.package_spec))
+        if pkgsforref:
+            for each in pkgsforref:
+                if self.cipkg:
+                    gitrefmsg.email_responsible = each.email_responsible
+                    self.send(self.cipkg, gitrefmsg)
+                if self.nolocal or not each.local_location:
+                    self.send(self.c2nr, gitrefmsg)
+        else:
+            if self.cipkg:
+                gitrefmsg.email_responsible = EMAILRESPONSIBLE
+                self.send(self.cipkg, gitrefmsg)
         self.status.add_pending()
         self._check_done()
 
@@ -2222,7 +2229,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         project_inputs = lambda revbr, brlist: OrderedDict(sorted(
             { p + '-src' : { "type": "git",
                              "value": "%s %s" % gitval(p, revbr, brlist),
-                             "emailresponsible": EMAILRESPONSIBLE,
+                             "emailresponsible": self.packages[p].email_responsible,
               } for p in self.packages
             }.items(), key=lambda e:e[0]))
         projbld = lambda revbr, brlist: jobset_defaults(
