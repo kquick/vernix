@@ -1171,7 +1171,7 @@ class StandardPackage_MixIn(object):
             return ('    %(package_name)s = rlslib.forAllSystems (system:'
                     '                           let pkgs = rlslib.pkgsFor system; in'
                     '                           pkgs.%(package_name)s);'
-                    % package.__dict__ % nixstrlist(systems))
+                    % package.__dict__ % { 'systems': nixstrlist(systems) })
         return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
 
     def kind_definitions_StandardPackage(self, is_static, frequency, systems=None):
