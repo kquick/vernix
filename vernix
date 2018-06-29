@@ -1163,11 +1163,8 @@ nixstrlist = lambda l: '[ ' + ' '.join(['"'+S+'"' for S in l]) + ' ]'
 class StandardPackage_MixIn(object):
 
     def package_overrides_StandardPackage(self, package_list, output_project_file):
-        pkgdef = lambda p: ('      %s = p.callPackage %s { project_nix = %s; inherit ghcver; };'
-                            % (p.package.name, p.nix_source,
-                               os.path.join(".", output_project_file)
-                               if output_project_file == os.path.basename(output_project_file)
-                               else output_project_file))
+        pkgdef = lambda p: ('      %s = p.callPackage %s { inherit ghcver projpkgs; };'
+                            % (p.package.name, p.nix_source))
         return map(pkgdef, sorted(package_list))
 
     def package_ref_StandardPackage(self, package, systems=None):
@@ -1406,14 +1403,16 @@ class ProjectConfig(SummaryBase):
                 yield line
 
         yield ''
-        yield 'in {'
+        yield '  projpkgs = {'
 
         for pkg in sorted(self.nixpackage_list, key=lambda p: p.package_name):
             yield self.call_mixin('package_ref', pkg.package.__class__.__name__,
                                   (pkg,
                                    self.systems if self.output_for_hydra else None))
 
-        yield '}'
+        yield '  };'
+        yield ''
+        yield 'in projpkgs'
 
         for line in [
                 '',
