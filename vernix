@@ -1384,7 +1384,7 @@ class ProjectConfig(SummaryBase):
         for kind in pkg_dict:
             yield ''
             yield '      # %s packages' % kind
-            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind], project_fname)):
+            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind], self.summary_fname)):
                 yield line
         for each in [ '    };',
                       '  };',
