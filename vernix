@@ -1162,9 +1162,15 @@ nixstrlist = lambda l: '[ ' + ' '.join(['"'+S+'"' for S in l]) + ' ]'
 
 class StandardPackage_MixIn(object):
 
-    def package_overrides_StandardPackage(self, package_list, output_project_file):
-        pkgdef = lambda p: ('      %s = p.callPackage %s { inherit ghcver projpkgs; pkgs=p; };'
-                            % (p.package.name, p.nix_source))
+    def package_overrides_StandardPackage(self, package_list, project_file):
+        pkgdef = lambda p: ('      %(name)s = p.callPackage %(source)s\n'
+                            '%(indent)s{ inherit ghcver;\n'
+                            '%(indent)s  projpkgs=%(projpkgs)s;\n'
+                            '%(indent)s  pkgs=p;\n%(indent)s};'
+                            % {'name': p.package.name,
+                               'source': p.nix_source,
+                               'indent':' '*16,
+                               'projpkgs': '(attrMap (drvForSystem p.system) projpkgs)'})
         return map(pkgdef, sorted(package_list))
 
     def package_ref_StandardPackage(self, package, systems=None):
@@ -1177,11 +1183,18 @@ class StandardPackage_MixIn(object):
 
     def kind_definitions_StandardPackage(self, is_static, frequency, systems=None):
         for each in [
-            '  cleanupSource =',
-            '    builtins.filterSource (path: type:',
-            '      let nm = baseNameOf path;',
-            '        in type != "directory" ||',
-            '           !(builtins.elem nm ["dist" "dist-newstyle" ".git" "_darcs"]));',
+                '  cleanupSource =',
+                '    builtins.filterSource (path: type:',
+                '      let nm = baseNameOf path;',
+                '        in type != "directory" ||',
+                '           !(builtins.elem nm ["dist" "dist-newstyle" ".git" "_darcs"]));',
+                '',
+                '  attrMap = f: s: builtins.listToAttrs',
+                '                    (builtins.map',
+                '                       (n: { "name"= n; "value"=f n (builtins.getAttr n s); })',
+                '                       (builtins.attrNames s));',
+                '',
+                '  drvForSystem = s: n: v: if builtins.hasAttr s v then builtins.getAttr s v else v;',
         ]:
             yield each
 
@@ -1192,7 +1205,7 @@ class StandardPackage_MixIn(object):
                     '               supportedSystems = ' + nixstrlist(systems) + ';',
                     '               packageSet = import nixpkgs;',
                     '               nixpkgsArgs = { config = config; };',
-                    '           };'
+                    '           };',
             ]:
                 yield each
 
