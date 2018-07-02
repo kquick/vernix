@@ -1163,7 +1163,7 @@ nixstrlist = lambda l: '[ ' + ' '.join(['"'+S+'"' for S in l]) + ' ]'
 class StandardPackage_MixIn(object):
 
     def package_overrides_StandardPackage(self, package_list, output_project_file):
-        pkgdef = lambda p: ('      %s = p.callPackage %s { inherit ghcver projpkgs; };'
+        pkgdef = lambda p: ('      %s = p.callPackage %s { inherit ghcver projpkgs; pkgs=p; };'
                             % (p.package.name, p.nix_source))
         return map(pkgdef, sorted(package_list))
 
