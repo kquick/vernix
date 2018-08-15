@@ -1,6 +1,6 @@
 #! /usr/bin/env nix-shell
 # -*- mode: python; -*-
-#! nix-shell -i "python3.6 -u" -p cabal2nix nix-prefetch-scripts haskell.compiler.ghc822 git "python36.withPackages(pp: with pp; [ thespian setproctitle ])"
+#! nix-shell -i "python3.6 -u" -p nix-prefetch-scripts haskell.compiler.ghc822 git "python36.withPackages(pp: with pp; [ thespian setproctitle ])" "haskell.lib.overrideCabal haskellPackages.cabal2nix (drv: { version=\"2.10.1-nosub\"; src = fetchgit { url=\"https://github.com/kquick/cabal2nix\"; rev=\"e4b3b46\"; sha256=\"0wx2s5l5gaxaz075gw3d21x8pkfmvz4jav00xwiga7d9kih5gh7c\"; }; })"
 
 # n.b. to add fancy progress bars, add both blessings and progressive
 # to the packages list above, but note that progressive is not
@@ -561,7 +561,8 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
 
 
     def receiveMsg_Local(self, localmsg, sender):
-        cmd = Command('cabal2nix', [localmsg.source_loc],
+        cmd = Command('cabal2nix', ['--dont-fetch-submodules',
+                                    localmsg.source_loc],
                       logger=None if getattr(localmsg, 'noisily', False) else False,
                       logtag='cabal2nix:local',
                       error_ok=not getattr(localmsg, 'noisily', False))
@@ -580,12 +581,9 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            getattr(refmsg, 'noisily', False)))
         self.troupe_work_in_progress = True
     def receiveMsg_GitRef(self, refmsg, sender):
-        # Note: this allows cabal2nix to handle the fetch, but
-        # cabal2nix fetches all submodules but it really just needs
-        # the top-level .cabal file... better way to retrieve that
-        # from the repo for better efficiency? (watch out for
-        # subpath...)
-        args = ['--revision', refmsg.ref]
+        args = ['--revision', refmsg.ref,
+                '--dont-fetch-submodules',
+        ]
         if refmsg.subpath:
             args.extend(['--subpath', refmsg.subpath])
         cmd = Command('cabal2nix', args + [refmsg.reporef],
@@ -598,7 +596,9 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
     def receiveMsg_GitRefWithLclSrc(self, refmsg, sender):
         cmd = Command('cabal2nix',
                       [os.path.join(refmsg.lclref, refmsg.gitref.subpath)
-                       if refmsg.gitref.subpath else refmsg.lclref],
+                       if refmsg.gitref.subpath else refmsg.lclref,
+                       '--dont-fetch-submodules'
+                      ],
                       logger=None if getattr(refmsg, 'noisily', False) else False,
                       logtag='cabal2nix:git+local',
                       error_ok=not getattr(refmsg, 'noisily', False))
@@ -699,7 +699,9 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         elif isinstance(msg.data, CloneReq):
             cmd = Command('cabal2nix', [os.path.join(msg.data.local_dir, msg.data.refmsg.subpath)
                                         if msg.data.refmsg.subpath else
-                                        msg.data.local_dir],
+                                        msg.data.local_dir,
+                                        '--dont-fetch-submodules'
+                                       ],
                           logger=None if getattr(msg.data, 'noisily', False) else False,
                           logtag='cabal2nix:git+local',
                           error_ok=not getattr(msg.data, 'noisily', False))
@@ -1334,6 +1336,7 @@ class HaskellPackage_MixIn(object):
         cabal2nix --hackage-db ${hackagedb}/hackage.haskell.org/01-index.tar \\
                   --compiler=${self.ghc.name} \\
                   --system=${pkgs.stdenv.system} \\
+                  --dont-fetch-submodules \\
                   ${sha256Arg} ${subdirArg} "${src}" > "$out/default.nix"
       '';
   };
