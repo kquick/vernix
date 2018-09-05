@@ -2064,6 +2064,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    'with (import <nixpkgs> {});',
                    'let',
                    '  pybuilder = pkgs.python36.withPackages (pp: with pp; [ thespian setproctitle ]);',
+                   '  cabal2nix = pkgs.haskell.lib.overrideCabal pkgs.haskellPackages.cabal2nix (drv: { version=\"2.10.1-nosub\"; src = pkgs.fetchgit { url=\"https://github.com/kquick/cabal2nix\"; rev=\"e4b3b46\"; sha256=\"0wx2s5l5gaxaz075gw3d21x8pkfmvz4jav00xwiga7d9kih5gh7c\"; }; });',
                    'in rec {',
                    '  %s = stdenv.mkDerivation rec {' % self.jobname(),
                    '    name = "' + self.project.name + '-master";',
@@ -2081,7 +2082,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '             -o hackage/01-index.tar.gz \\',
                    '             https://hackage.haskell.org/01-index.tar.gz',
                    '        gunzip  hackage/01-index.tar.gz || mv hackage/01-index.tar.gz hackage/01-index.tar',
-                   '        $vernix/bin/vernix $src/%s --noisy \\' %
+                   '        python3 $vernix/bin/vernix $src/%s --noisy \\' %
                             self.projdef_filepath(os.path.basename(self.input_path)),
                    # Provide local sources for inputs for cabal2nix
                    # generation of nix specifications; if cabal2nix is
