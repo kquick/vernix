@@ -2059,6 +2059,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                                    if getattr(r, 'subpath', None) else ''))
         output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
                    ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
+                   ', hackage-index', # Provided as an explicit path input
                    ', projectdef',
                    '}:',
                    'with (import <nixpkgs> {});',
@@ -2077,10 +2078,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '        mkdir $out',
                    '        cd $out',
                    '        mkdir hackage',
-                   '        ${curl.bin}/bin/curl --cacert ${cacert}/etc/ssl/certs/ca-bundle.crt \\',
-                   '             --compressed \\',
-                   '             -o hackage/01-index.tar.gz \\',
-                   '             https://hackage.haskell.org/01-index.tar.gz',
+                   '        cp ${hackage-index} hackage/01-index.tar.gz',
                    '        gunzip  hackage/01-index.tar.gz || mv hackage/01-index.tar.gz hackage/01-index.tar',
                    '        python3 $vernix/bin/vernix $src/%s --noisy \\' %
                             self.projdef_filepath(os.path.basename(self.input_path)),
@@ -2273,7 +2271,13 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                       "type": "git",
                       "value": "https://github.com/kquick/vernix.git",
                       "emailresponsible": True,
-                  }},
+                  },
+                  "hackage-index" : {
+                      "type": "path",
+                      "value": "https://hackage.haskell.org/01-index.tar.gz",
+                      "emailresponsible": False,
+                  },
+                },
                 project_inputs(revbr, brlist))
         )
         branchlist = self.variants.get('repo_branch', [None])
