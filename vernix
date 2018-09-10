@@ -2077,7 +2077,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '        mkdir $out',
                    '        cd $out',
                    '        mkdir hackage',
-                   '        curl --cacert ${cacert}/etc/ssl/certs/ca-bundle.crt \\',
+                   '        ${curl.bin}/bin/curl --cacert ${cacert}/etc/ssl/certs/ca-bundle.crt \\',
                    '             --compressed \\',
                    '             -o hackage/01-index.tar.gz \\',
                    '             https://hackage.haskell.org/01-index.tar.gz',
