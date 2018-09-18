@@ -2274,7 +2274,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                   },
                   "hackage-index" : {
                       "type": "path",
-                      "value": "https://hackage.haskell.org/01-index.tar.gz",
+                      "value": "https://hackage.haskell.org/01-index.tar.gz 86400",
                       "emailresponsible": False,
                   },
                 },
