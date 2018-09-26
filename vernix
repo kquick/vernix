@@ -122,12 +122,14 @@ class HaskellPackage(StandardPackage):
     def __init__(self, name, *args, version=None, dontCheck=False,
                  jailBreak=False, dontHaddock=False,
                  dontProfile=False,
+                 doCoverage=False,
                  extraLibraries=None, **kw):
         super(HaskellPackage, self).__init__(name, version, *args, **kw)
         self.dontCheck = dontCheck
         self.jailBreak = jailBreak
         self.dontHaddock = dontHaddock
         self.dontProfile = dontProfile
+        self.doCoverage = doCoverage
         self.extraLibraries = extraLibraries or []
 
     @staticmethod
@@ -139,6 +141,9 @@ class HaskellPackage(StandardPackage):
 
     def _dcwrap(self, callstr):
         return self._wrapif(self.dontCheck, 'dontCheck', callstr)
+
+    def _covwrap(self, callstr):
+        return self._wrapif(self.doCoverage, 'doCoverage', callstr)
 
     def _profwrap(self, callstr):
         return self._wrapif(self.dontProfile, 'disableExecutableProfiling',
@@ -155,7 +160,7 @@ class HaskellPackage(StandardPackage):
     ']';
 
     def with_wrappers(self, callstr):
-        return self._profwrap(self._extralibwrap(self._jbwrap(self._dcwrap(self._haddockwrap(callstr)))))
+        return self._profwrap(self._extralibwrap(self._jbwrap(self._covwrap(self._dcwrap(self._haddockwrap(callstr))))))
 
     def package_suppliers(self):
         if self.version:
@@ -2642,6 +2647,7 @@ nix specification:
         HaskellPackage("name", version="version",
                        dontCheck=True, jailBreak=True,
                        dontHaddock=True, dontProfile=True,
+                       doCoverage=True,
                        extraLibraries=[...])
         HaskellPackage("name", version="branch-or-hash",
                        RepoIdent(reposerver="https://github.com",
