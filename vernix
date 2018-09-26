@@ -59,16 +59,20 @@ class RepoIdent(Base_Location, Settable):
         self.team = team
         self.reponame = reponame
         self.subpath = subpath
-        self.sep1 = ':' if self.reposerver.startswith('git@') else '/'
         self.cbi_reposerver = cbi_reposerver or reposerver
+    def rmtref(self, reposerver):
+        return ('%(reposerver)s%(sep)s%(team)s/%(reponame)s.git' %
+                { 'reposerver': reposerver,
+                  'team' : self.team,
+                  'reponame' : self.reponame,
+                  'sep' : ':' if reposerver.startswith('git@') else '/'
+                })
     @property
     def source_loc(self):
-        return '%(reposerver)s%(sep1)s%(team)s/%(reponame)s.git' % self.__dict__
+        return self.rmtref(self.reposerver)
     @property
     def cbi_source_loc(self):
-        repl = {'sep': ':' if self.cbi_reposerver.startswith('git@') else '/'}
-        repl.update(self.__dict__)
-        return '%(cbi_reposerver)s%(sep)s%(team)s/%(reponame)s.git' % repl
+        return self.rmtref(self.cbi_reposerver)
 
 class Local(Base_Location):
     "Specifies a local directory for this package's source"
