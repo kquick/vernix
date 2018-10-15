@@ -115,6 +115,8 @@ class StandardPackage(Base_PackageIdent):
         return self
     def origin_info(self):
         return str(self.local_location or self.repo_location or self.package_suppliers())
+    def set_just_dev(self):
+        pass
 
 
 class HaskellPackage(StandardPackage):
@@ -131,6 +133,12 @@ class HaskellPackage(StandardPackage):
         self.dontProfile = dontProfile
         self.doCoverage = doCoverage
         self.extraLibraries = extraLibraries or []
+
+    def set_just_dev(self):
+        self.dontCheck = True
+        self.dontHaddock = True
+        self.dontProfile = True
+        self.doCoverage = False
 
     @staticmethod
     def _wrapif(test, wrap, onstr):
@@ -1616,6 +1624,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
             static = 'static' in strmsg or 'hydra' in strmsg
             hydra = 'hydra' in strmsg
             self.nolocal = 'nolocal' in strmsg
+            self.just_dev = 'just-dev' in strmsg
 
             if static:
                 # Use this to create local .nix definitions from cabal
@@ -1714,6 +1723,9 @@ class GenerateNixInfo(ActorTypeDispatcher):
                            'repository location'
                            if each.repo_location else 'default package source'))
                     each.local_location = None
+
+                if getattr(self, 'just_dev', False):
+                    each.set_just_dev()
 
                 if each.local_location and should_use_local(each):
                     # Local is the priority for dev
@@ -2553,7 +2565,7 @@ class SRep(ActorTypeDispatcher):
 def gen_nix(filename=None, static=False, hydra=False, nolocal=False,
             overrides=None, references=None,
             noisy=False, allowUnfree=False, frequency=None,
-            extern_reporter=False):
+            extern_reporter=False, just_dev=False):
     """Starts the actor processing for the input file and waits for the
        final result, displaying any ProgressStatus messages received
        in the interim.
@@ -2593,6 +2605,7 @@ def gen_nix(filename=None, static=False, hydra=False, nolocal=False,
                                     'static' if static or hydra else '',
                                     'hydra' if hydra else '',
                                     'nolocal' if nolocal else '',
+                                    'just-dev' if just_dev else '',
     ]))
     while True:
         resp = asys.listen(125)
@@ -2632,6 +2645,7 @@ if __name__ == "__main__":
     if '-h' in sys.argv or '--help' in sys.argv:
         print('''Usage: %s [--help] [--fast] [--noisy] [--allowUnfree]
                            [--daily] [--hourly] [--static|--dynamic] [input-file]
+                           [--dev]
                            [name: path]
 
 Tool to read the package_spec file and generate a nix specification.
@@ -2730,6 +2744,10 @@ The --nolocal flag will instruct vernix to ignore any Local
 references; this is commonly used by Hydra or other remote build
 environments.
 
+The --dev flag indicates that this vernix run is for local development
+only: this suppresses all tests, profiling and haddock/documentation
+generation and performs only simple core builds.
+
 Additionally, any .nix files found in the same directory as the
 package_spec will automatically be added as package override
 specifications.
@@ -2774,6 +2792,7 @@ additional package set downloads and storage in the nix store.
                          static='--static' in argv or '--dynamic' not in argv,
                          hydra='--hydra' in argv,
                          nolocal='--nolocal' in argv,
+                         just_dev='--dev' in argv,
                          overrides=overrides,
                          references=references,
                          frequency=('hourly' if '--hourly' in argv
