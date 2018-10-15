@@ -1181,7 +1181,7 @@ nixstrlist = lambda l: '[ ' + ' '.join(['"'+S+'"' for S in l]) + ' ]'
 
 class StandardPackage_MixIn(object):
 
-    def package_overrides_StandardPackage(self, package_list, project_file):
+    def package_overrides_StandardPackage(self, package_list):
         pkgdef = lambda p: ('      %(name)s = p.callPackage %(source)s\n'
                             '%(indent)s{ inherit ghcver;\n'
                             '%(indent)s  projpkgs=%(projpkgs)s;\n'
@@ -1245,7 +1245,7 @@ class HaskellPackage_MixIn(object):
         return '    %(package_name)s = pkgs.haskell.packages.${ghcver}.%(package_name)s;' \
             % package.__dict__
 
-    def package_overrides_HaskellPackage(self, package_list, project_file):
+    def package_overrides_HaskellPackage(self, package_list):
         package_defs = [ self._package_def_HaskellPackage_(pkg)
                          for pkg in sorted(package_list) ]
         return (
@@ -1414,8 +1414,7 @@ class ProjectConfig(SummaryBase):
         for kind in pkg_dict:
             yield ''
             yield '      # %s packages' % kind
-            for line in self.call_mixin('package_overrides', kind,
-                                        (pkg_dict[kind], os.path.join(os.getcwd(), project_fname))):
+            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind], )):
                 yield line
         for each in [ '    };',
                       '  };',
