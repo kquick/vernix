@@ -2085,7 +2085,6 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    'with (import <nixpkgs> {});',
                    'let',
                    '  pybuilder = pkgs.python36.withPackages (pp: with pp; [ thespian setproctitle ]);',
-                   '  cabal2nix = pkgs.haskell.lib.overrideCabal pkgs.haskellPackages.cabal2nix (drv: { version=\"2.10.1-nosub\"; src = pkgs.fetchgit { url=\"https://github.com/kquick/cabal2nix\"; rev=\"e4b3b46\"; sha256=\"0wx2s5l5gaxaz075gw3d21x8pkfmvz4jav00xwiga7d9kih5gh7c\"; }; });',
                    'in rec {',
                    '  %s = stdenv.mkDerivation rec {' % self.jobname(),
                    '    name = "' + self.project.name + '-master";',
