@@ -1,7 +1,6 @@
 #! /usr/bin/env nix-shell
 # -*- mode: python; -*-
-#! nix-shell -i "python3.6 -u" -p nix-prefetch-scripts haskell.compiler.ghc822 git "python36.withPackages(pp: with pp; [ thespian setproctitle ])" "haskell.lib.overrideCabal haskellPackages.cabal2nix (drv: { version=\"2.10.1-nosub\"; src = fetchgit { url=\"https://github.com/kquick/cabal2nix\"; rev=\"e4b3b46\"; sha256=\"0wx2s5l5gaxaz075gw3d21x8pkfmvz4jav00xwiga7d9kih5gh7c\"; }; })"
-
+#! nix-shell -i "python3.7 -u" -p nix-prefetch-scripts haskell.compiler.ghc822 git "python37.withPackages(pp: with pp; [ thespian setproctitle ])" "haskell.lib.overrideCabal haskellPackages.cabal2nix (drv: { version=\"2.10.1-nosub\"; src = fetchgit { url=\"https://github.com/kquick/cabal2nix\"; rev=\"e4b3b46\"; sha256=\"0wx2s5l5gaxaz075gw3d21x8pkfmvz4jav00xwiga7d9kih5gh7c\"; }; })"
 # n.b. to add fancy progress bars, add both blessings and progressive
 # to the packages list above, but note that progressive is not
 # currently part of the standard nix specifications and so an overlay
