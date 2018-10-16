@@ -133,12 +133,17 @@ class HaskellPackage(StandardPackage):
         self.dontProfile = dontProfile
         self.doCoverage = doCoverage
         self.extraLibraries = extraLibraries or []
+        self.haddockRoot = None
 
     def set_just_dev(self):
         self.dontCheck = True
         self.dontHaddock = True
         self.dontProfile = True
         self.doCoverage = False
+
+    def set_haddock_root(self, haddockRoot):
+        self.haddockRoot = haddockRoot
+
 
     @staticmethod
     def _wrapif(test, wrap, onstr):
@@ -158,7 +163,9 @@ class HaskellPackage(StandardPackage):
                             self._wrapif(self.dontProfile, 'disableLibraryProfiling', callstr))
 
     def _haddockwrap(self, callstr):
-        return self._wrapif(self.dontHaddock, 'dontHaddock', callstr)
+        return self._wrapif(self.haddockRoot and not self.dontHaddock,
+                            'haddockWithRoot pkgs.%s' % self.haddockRoot,
+                            self._wrapif(self.dontHaddock, 'dontHaddock', callstr))
 
     def _extralibwrap(self, callstr):
         if not self.extraLibraries:
@@ -1181,7 +1188,7 @@ nixstrlist = lambda l: '[ ' + ' '.join(['"'+S+'"' for S in l]) + ' ]'
 
 class StandardPackage_MixIn(object):
 
-    def package_overrides_StandardPackage(self, package_list):
+    def package_overrides_StandardPackage(self, package_list, all_package_names):
         pkgdef = lambda p: ('      %(name)s = p.callPackage %(source)s\n'
                             '%(indent)s{ inherit ghcver;\n'
                             '%(indent)s  projpkgs=%(projpkgs)s;\n'
@@ -1192,7 +1199,7 @@ class StandardPackage_MixIn(object):
                                'projpkgs': '(attrMap (drvForSystem p.system) projpkgs)'})
         return map(pkgdef, sorted(package_list))
 
-    def package_ref_StandardPackage(self, package, systems=None):
+    def package_ref_StandardPackage(self, package, systems=None, allpkgnames=None):
         if systems:
             return ('    %(package_name)s = rlslib.forAllSystems (system:\n'
                     '                           let pkgs = rlslib.pkgsFor system; in\n'
@@ -1236,17 +1243,26 @@ class HaskellPackage_MixIn(object):
             self._haskell_compilers = self.createActor(NixGHCCompilers)
             self.send(self._haskell_compilers, 'get')
 
-    def package_ref_HaskellPackage(self, package, systems=None):
+    def package_ref_HaskellPackage(self, package, systems=None, allpkgnames=None):
+        start = '    %(package_name)s = '
+        middle = []
+        end = 'pkgs.haskell.packages.${ghcver}.%(package_name)s'
         if systems:
-            return ('    %(package_name)s = rlslib.forAllSystems (system:\n'
-                    '                           let pkgs = rlslib.pkgsFor system; in\n'
-                    '                           pkgs.haskell.packages.${ghcver}.%(package_name)s);'
-                    % package.__dict__ % { 'systems': nixstrlist(systems) })
-        return '    %(package_name)s = pkgs.haskell.packages.${ghcver}.%(package_name)s;' \
-            % package.__dict__
+            middle = middle + [ 'rlslib.forAllSystems (system:',
+                                '    let pkgs = rlslib.pkgsFor system; in',
+            ]
+            end = end + ")"
+        if middle:
+            return ('\n' + (' '*24)).join([ start + middle[0] ] + middle[1:] + [end + ';']) % package.__dict__
+        else:
+            return '%s%s;' % (start, end) % package.__dict__
 
-    def package_overrides_HaskellPackage(self, package_list):
-        package_defs = [ self._package_def_HaskellPackage_(pkg)
+    def package_overrides_HaskellPackage(self, package_list, all_package_names):
+        withHaddockRoot = ('haddock'
+                           if all_package_names and 'haddock' in all_package_names
+                           else '')
+
+        package_defs = [ self._package_def_HaskellPackage_(pkg, withHaddockRoot)
                          for pkg in sorted(package_list) ]
         return (
             [ '      haskell = p.haskell // {',
@@ -1261,8 +1277,10 @@ class HaskellPackage_MixIn(object):
                 '      };',
             ])
 
-    def _package_def_HaskellPackage_(self, pkg):
+    def _package_def_HaskellPackage_(self, pkg, withHaddockRoot):
         fmt = '               %s = %%s;' % pkg.package.name
+        if withHaddockRoot:
+            pkg.package.set_haddock_root(withHaddockRoot)
         if not pkg.nix_source:
             callpkg = 'super.%s' % pkg.package.name
         elif isinstance(pkg.nix_source, CabalSpec):
@@ -1299,6 +1317,21 @@ class HaskellPackage_MixIn(object):
         return (clean_local_source(pkg.nix_source), 'null')
 
     def kind_definitions_HaskellPackage(self, is_static, frequency, systems=None):
+        for each in [
+                '''
+  haddockWithRoot = root: pkg: pkgs.haskell.lib.overrideCabal pkg (pkg: {
+                      haddockPhase = ''
+                        runHook preHaddock
+                        ${pkgs.stdenv.lib.optionalString pkg.isLibrary ''
+                           ${pkg.setupCommand} haddock --html --hoogle --hyperlink-source --use-index=${root}/doc-index.html --use-contents=${root}/index.html
+                        ''}
+                        runHook postHaddock
+                      '';
+                    });
+                ''' ,
+                ]:
+            yield each
+
         if not is_static:
             for each in [
                  '''
@@ -1397,7 +1430,7 @@ class ProjectConfig(SummaryBase):
                         'StandardPackage': StandardPackage_MixIn(),
         }
 
-    def _generate_summary_data(self, project_fname, sample_pkgname, pkg_dict):
+    def _generate_summary_data(self, project_fname, sample_pkgname, pkg_dict, allpkgnames):
         for each in [ '{ nixpkgs ? <nixpkgs>',
                       ', ghcver ? "ghc822"',
                       '}:',
@@ -1414,7 +1447,7 @@ class ProjectConfig(SummaryBase):
         for kind in pkg_dict:
             yield ''
             yield '      # %s packages' % kind
-            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind], )):
+            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind], allpkgnames)):
                 yield line
         for each in [ '    };',
                       '  };',
@@ -1440,7 +1473,8 @@ class ProjectConfig(SummaryBase):
         for pkg in sorted(self.nixpackage_list, key=lambda p: p.package_name):
             yield self.call_mixin('package_ref', pkg.package.__class__.__name__,
                                   (pkg,
-                                   self.systems if self.output_for_hydra else None))
+                                   self.systems if self.output_for_hydra else None,
+                                   allpkgnames))
 
         yield '  };'
         yield ''
@@ -1489,6 +1523,8 @@ class ProjectConfig(SummaryBase):
                              if pkg.package.__class__.__name__ == kind ]
                      for kind in self.mixin_kinds() }
 
+        allpkgnames = [p.package.name for p in self.nixpackage_list]
+
         sample_pkgname = sorted([p.package.name
                                  for p in self.nixpackage_list
                                  if p.package.name != project_name]
@@ -1497,7 +1533,7 @@ class ProjectConfig(SummaryBase):
         contents = [ line
                      for line in self._generate_summary_data(project_fname,
                                                              sample_pkgname,
-                                                             pkg_dict) ]
+                                                             pkg_dict, allpkgnames) ]
 
         self.send(wf, ('summarygen', self.summary_fname, contents))
 
