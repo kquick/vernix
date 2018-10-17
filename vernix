@@ -1319,7 +1319,7 @@ class HaskellPackage_MixIn(object):
     def kind_definitions_HaskellPackage(self, is_static, frequency, systems=None):
         for each in [
                 '''
-  haddockWithRoot = root: pkg: pkgs.haskell.lib.overrideCabal pkg (pkg: {
+  haddockWithRoot = root: pkg: pkg // {
                       haddockPhase = ''
                         runHook preHaddock
                         ${pkgs.stdenv.lib.optionalString pkg.isLibrary ''
@@ -1327,7 +1327,7 @@ class HaskellPackage_MixIn(object):
                         ''}
                         runHook postHaddock
                       '';
-                    });
+                    };
                 ''' ,
                 ]:
             yield each
