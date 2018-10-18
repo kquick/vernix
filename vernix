@@ -1334,6 +1334,7 @@ class HaskellPackage_MixIn(object):
                                 --use-contents=${root}/index.html \
                                 $(for i in ${inputs}; do for h in $i/*.haddock; do if [ "$h" != "$i/*.haddock" ] ; then echo "--read-interface=$i,$h"; fi; done; done)
                         ''}
+                        sed -i -e s,file://,,g *.html
                         runHook postHaddock
                       '';
                     };
