@@ -164,8 +164,8 @@ class HaskellPackage(StandardPackage):
                             self._wrapif(self.dontProfile, 'disableLibraryProfiling', callstr))
 
     def _haddockwrap(self, callstr):
-        return self._wrapif(self.haddockRoot and not self.dontHaddock,
-                            'haddockWithRoot "%s"'%self.haddockRoot,
+        return self._wrapif(not self.dontHaddock,
+                            'haddockWithRoot "%s"'%(self.haddockRoot or "{no-root}"),
                             self._wrapif(self.dontHaddock, 'dontHaddock', callstr))
 
     def _extralibwrap(self, callstr):
@@ -1329,14 +1329,16 @@ class HaskellPackage_MixIn(object):
                                     (map (p: p.haddockDir p)
                                      (builtins.filter (p: builtins.isAttrs p && p ? "haddockDir" && p.haddockDir p != null)
                                       a.propagatedBuildInputs));
+                        urlRootArgs = if (root == "{no-root}") then ""
+                                      else '' --haddock-options=--use-index=${root}/doc-index.html \\
+                                              --contents-location=${root}/index.html'';
                     in
                     pkg.overrideAttrs (oldAttrs: {
                       haddockPhase = ''
                         runHook preHaddock
                         echo :::: Extended haddock with URL ${root}
-                        ./Setup haddock --html --hoogle --hyperlink-source --all \\
-                                --haddock-options=--use-index=${root}/doc-index.html \\
-                                --contents-location=${root}/index.html \\
+                        ./Setup haddock --html --hoogle --hyperlink-source \\
+                                ${urlRootArgs} --all \\
                                 $(for i in ${depsOf oldAttrs}; do for h in $i/*.haddock; do if [ "$h" != "$i/*.haddock" ] ; then echo "--haddock-options=--read-interface=$i,$h"; fi; done; done)
                         # for h in *.html ; do
                         #   sed -i -e s,file://,,g $h
