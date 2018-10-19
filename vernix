@@ -1336,9 +1336,9 @@ class HaskellPackage_MixIn(object):
                     pkg.overrideAttrs (oldAttrs: {
                       haddockPhase = ''
                         runHook preHaddock
-                        echo :::: Extended haddock with URL ${root}
+                        echo :::: Extended haddock with executables and internal for URL ${root}
                         ./Setup haddock --html --hoogle --hyperlink-source \\
-                                ${urlRootArgs} --all \\
+                                ${urlRootArgs} --executables --internal \\
                                 $(for i in ${depsOf oldAttrs}; do for h in $i/*.haddock; do if [ "$h" != "$i/*.haddock" ] ; then echo "--haddock-options=--read-interface=$i,$h"; fi; done; done)
                         for h in *.html ; do
                           sed -i -e s,file://,,g $h
