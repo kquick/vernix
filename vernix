@@ -44,9 +44,10 @@ class Settable(object):
 
 class Project(object):
     "Specifies the name of the project being declared"
-    def __init__(self, name, allowUnfree=None):
+    def __init__(self, name, allowUnfree=None, docRootURL=None):
         self.name = name
         self.allowUnfree = allowUnfree
+        self.docRootURL = docRootURL
 
 class Base_Location(object): pass
 
@@ -164,7 +165,7 @@ class HaskellPackage(StandardPackage):
 
     def _haddockwrap(self, callstr):
         return self._wrapif(self.haddockRoot and not self.dontHaddock,
-                            'haddockWithRoot pkgs.%s' % self.haddockRoot,
+                            'haddockWithRoot "%s"'%self.haddockRoot,
                             self._wrapif(self.dontHaddock, 'dontHaddock', callstr))
 
     def _extralibwrap(self, callstr):
@@ -1028,6 +1029,7 @@ class SummaryBase(ActorTypeDispatcher):
         super(SummaryBase, self).__init__(*args, **kw)
         self.nixpackage_list = []
         self.allowUnfree = False
+        self.docRootURL = None
         self.static = False
         self.frequency = '%Y-w%W'
         self.systems = None
@@ -1065,6 +1067,9 @@ class SummaryBase(ActorTypeDispatcher):
     def receiveMsg_str(self, strmsg, sender):
         if strmsg == 'allowUnfree':
             self.allowUnfree = True
+            return
+        if strmsg.startswith('docRootURL:'):
+            self.docRootURL = strmsg[len('docRootURL:'):]
             return
         if strmsg.startswith('update:'):
             if strmsg == 'update:hourly':
@@ -1188,7 +1193,7 @@ nixstrlist = lambda l: '[ ' + ' '.join(['"'+S+'"' for S in l]) + ' ]'
 
 class StandardPackage_MixIn(object):
 
-    def package_overrides_StandardPackage(self, package_list, all_package_names):
+    def package_overrides_StandardPackage(self, package_list, all_package_names, docRootURL):
         pkgdef = lambda p: ('      %(name)s = p.callPackage %(source)s\n'
                             '%(indent)s{ inherit ghcver;\n'
                             '%(indent)s  projpkgs=%(projpkgs)s;\n'
@@ -1257,9 +1262,9 @@ class HaskellPackage_MixIn(object):
         else:
             return '%s%s;' % (start, end) % package.__dict__
 
-    def package_overrides_HaskellPackage(self, package_list, all_package_names):
-        withHaddockRoot = ('haddock'
-                           if all_package_names and 'haddock' in all_package_names
+    def package_overrides_HaskellPackage(self, package_list, all_package_names, docRootURL):
+        withHaddockRoot = (docRootURL
+                           if docRootURL and all_package_names and 'haddock' in all_package_names
                            else '')
 
         package_defs = [ self._package_def_HaskellPackage_(pkg, withHaddockRoot)
@@ -1320,28 +1325,26 @@ class HaskellPackage_MixIn(object):
         for each in [
                 '''
   haddockWithRoot = root: pkg:
-                    let inputs = builtins.concatStringsSep " "
-                                 (map (p: p.haddockDir p)
-                                  (builtins.filter (p: builtins.isAttrs p && p ? "haddockDir" && p.haddockDir p != null)
-                                   pkg.propagatedBuildInputs));
+                    let depsOf = a: builtins.concatStringsSep " "
+                                    (map (p: p.haddockDir p)
+                                     (builtins.filter (p: builtins.isAttrs p && p ? "haddockDir" && p.haddockDir p != null)
+                                      a.propagatedBuildInputs));
                     in
-                    pkg // {
+                    pkg.overrideAttrs (oldAttrs: {
                       haddockPhase = ''
-                        set -x
                         runHook preHaddock
-                        ${pkgs.stdenv.lib.optionalString pkg.isLibrary ''
-                           ${pkg.setupCommand} haddock --html --hoogle --hyperlink-source \\
-                                --use-index=${root}/doc-index.html \\
-                                --use-contents=${root}/index.html \\
-                                $(for i in ${inputs}; do for h in $i/*.haddock; do if [ "$h" != "$i/*.haddock" ] ; then echo "--read-interface=$i,$h"; fi; done; done)
-                        ''}
-                        for h in *.html ; do
-                          sed -i -e s,file://,,g $h
-                        done
+                        echo :::: Extended haddock with URL ${root}
+                        ./Setup haddock --html --hoogle --hyperlink-source --all \\
+                                --haddock-options=--use-index=${root}/doc-index.html \\
+                                --contents-location=${root}/index.html \\
+                                $(for i in ${depsOf oldAttrs}; do for h in $i/*.haddock; do if [ "$h" != "$i/*.haddock" ] ; then echo "--haddock-options=--read-interface=$i,$h"; fi; done; done)
+                        # for h in *.html ; do
+                        #   sed -i -e s,file://,,g $h
+                        # done
                         runHook postHaddock
                         set +x
                       '';
-                    };
+                    });
                 ''' ,
                 ]:
             yield each
@@ -1461,7 +1464,7 @@ class ProjectConfig(SummaryBase):
         for kind in pkg_dict:
             yield ''
             yield '      # %s packages' % kind
-            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind], allpkgnames)):
+            for line in self.call_mixin('package_overrides', kind, (pkg_dict[kind], allpkgnames, self.docRootURL)):
                 yield line
         for each in [ '    };',
                       '  };',
@@ -1743,6 +1746,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     self.send(self.ciproj, each)
                 if each.allowUnfree:
                     self.send(self.summarygen, 'allowUnfree')
+                if each.docRootURL:
+                    self.send(self.summarygen, 'docRootURL:%s'%each.docRootURL)
                 continue
             elif isinstance(each, StandardPackage):
                 # Each package can come from the standard packaging tool
