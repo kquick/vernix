@@ -1327,15 +1327,19 @@ class HaskellPackage_MixIn(object):
                     in
                     pkg // {
                       haddockPhase = ''
+                        set -x
                         runHook preHaddock
                         ${pkgs.stdenv.lib.optionalString pkg.isLibrary ''
-                           ${pkg.setupCommand} haddock --html --hoogle --hyperlink-source \
-                                --use-index=${root}/doc-index.html \
-                                --use-contents=${root}/index.html \
+                           ${pkg.setupCommand} haddock --html --hoogle --hyperlink-source \\
+                                --use-index=${root}/doc-index.html \\
+                                --use-contents=${root}/index.html \\
                                 $(for i in ${inputs}; do for h in $i/*.haddock; do if [ "$h" != "$i/*.haddock" ] ; then echo "--read-interface=$i,$h"; fi; done; done)
                         ''}
-                        sed -i -e s,file://,,g *.html
+                        for h in *.html ; do
+                          sed -i -e s,file://,,g $h
+                        done
                         runHook postHaddock
+                        set +x
                       '';
                     };
                 ''' ,
