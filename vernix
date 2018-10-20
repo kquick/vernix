@@ -1335,6 +1335,7 @@ class HaskellPackage_MixIn(object):
                     in
                     pkg.overrideAttrs (oldAttrs: {
                       haddockPhase = ''
+                        set -x
                         runHook preHaddock
                         echo :::: Extended haddock with internal for URL ${root}
                         ./Setup haddock --html --hoogle --hyperlink-source \\
