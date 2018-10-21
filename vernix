@@ -2164,7 +2164,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # otherwise the input specification doesn't match
                    # the native project file and therefore this isn't
                    # seen as a valid build substitute.
-                   "          " + "\n          ".join([ "%s= ${%s-src}%s \\"
+                   "          " + "\n          ".join([ "%s: ${%s-src}%s \\"
                                                         % (k, k, subpath(self.packages[k]))
                                                         for k in inputs]),
                    # Specify --nolocal and --static so that vernix
