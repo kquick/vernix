@@ -1383,9 +1383,16 @@ class HaskellPackage_MixIn(object):
                       haddockPhase = ''
                         runHook preHaddock
                         echo :::: Extended haddock with internal for URL ${root}
-                        ./Setup haddock --html --hoogle --hyperlink-source \\
-                                ${urlRootArgs} --internal \\
-                                $(for i in ${depsOf oldAttrs}; do for h in $i/*.haddock; do if [ "$h" != "$i/*.haddock" ] ; then echo "--haddock-options=--read-interface=$i,$h"; fi; done; done)
+                        inputs=$(for i in ${depsOf oldAttrs}; do
+                                   for h in $i/*.haddock; do
+                                     if [ "$h" != "$i/*.haddock" ] ; then
+                                       echo "--haddock-options=--read-interface=$i,$h";
+                                     fi;
+                                   done;
+                                 done)
+                        if [ ! -z "$inputs" ] ; then
+                          ./Setup haddock --html --hoogle --hyperlink-source ${urlRootArgs} --internal $inputs
+                        fi
                         runHook postHaddock
                       '';
                     });
