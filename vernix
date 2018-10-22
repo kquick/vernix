@@ -54,13 +54,22 @@ class Base_Location(object): pass
 class RepoIdent(Base_Location, Settable):
     "Specifies the Source Code Repository coordinates for this package"
     def __init__(self, reposerver='https://github.com',
-                 team=None, reponame=None, subpath=None, cbi_reposerver=None):
+                 team=None, reponame=None, subpath=None, cbi_reposerver=None,
+                 restricted_access=False):
         super(RepoIdent, self).__init__()
         self.reposerver = reposerver
         self.team = team
         self.reponame = reponame
         self.subpath = subpath
         self.cbi_reposerver = cbi_reposerver or reposerver
+        # Set cbi_restricted_access to True if the CBI repo cannot be
+        # generally accessed during operations and only hydra input
+        # prefetch is capable of retrieving the repo data.  Setting
+        # this to True will prevent the hydra vernix_output from using
+        # a source reference; the package will be built but it will
+        # not be a true binary substitution due to having a different
+        # src.
+        self.restricted_access = restricted_access
     def rmtref(self, reposerver):
         return ('%(reposerver)s%(sep)s%(team)s/%(reponame)s.git' %
                 { 'reposerver': reposerver,
@@ -79,9 +88,16 @@ class Local(Base_Location):
     "Specifies a local directory for this package's source"
     def __init__(self, localpath):
         self._localpath = localpath
+        self._is_reference_for = None
     @property
     def source_loc(self):
         return os.path.expandvars(os.path.expanduser(self._localpath))
+    @property
+    def reference(self):
+        return self._is_reference_for
+    @reference.setter
+    def reference(self, newval):
+        self._is_reference_for = newval
     def __str__(self):
         return self.source_loc + ' directory'
 
@@ -313,13 +329,14 @@ class WriteFile(ActorTypeDispatcher):
 
 class GitRef(object):
     """Reference to a specific git patch."""
-    def __init__(self, name, branch, ref, reporef, subpath=None, cbi_reporef=None):
+    def __init__(self, name, branch, ref, reporef, subpath=None, cbi_reporef=None, restricted_access=False):
         self.name = name        # The name from the input RepoIdent
         self.reporef = reporef  # The repository reference (url + team + reponame)
         self.cbi_reporef = cbi_reporef or reporef  # Repository reference that CBI system should use (e.g. if private)
         self.branch = branch    # The input version from the RepoIdent
         self.ref = ref          # The patch reference obtained from the repository
         self.subpath = subpath  # the subpath in the repo where this package lives (from RepoIdent)
+        self.restricted_access = restricted_access
 
 
 @troupe()
@@ -378,14 +395,16 @@ class GitBranchRef(ActorTypeDispatcher):
                 self.send(self.requestor, GitRef(name=name, branch=branch, ref=branch,
                                                  reporef=reporef,
                                                  cbi_reporef=cbi_reporef,
-                                                 subpath=cmdres.command.reqmsg.repo_location.subpath))
+                                                 subpath=cmdres.command.reqmsg.repo_location.subpath,
+                                                 restricted_access=cmdres.command.reqmsg.repo_location.restricted_access))
         elif len(match) > 1:
             m = list(filter(lambda x: x.strip().endswith(' refs/heads/' + branch), match)) + \
                 list(filter(lambda x: x.strip().endswith('\trefs/heads/' + branch), match))
             if len(m) == 1:
                 self.send(self.requestor, GitRef(name=name, branch=branch, ref=m[0].split('\t')[0],
                                                  reporef=reporef, cbi_reporef=cbi_reporef,
-                                                 subpath=cmdres.command.reqmsg.repo_location.subpath))
+                                                 subpath=cmdres.command.reqmsg.repo_location.subpath,
+                                                 restricted_access=cmdres.command.reqmsg.repo_location.restricted_access))
             else:
                 self.send(self.requestor,
                           Error((name,
@@ -395,7 +414,8 @@ class GitBranchRef(ActorTypeDispatcher):
         else:
             self.send(self.requestor, GitRef(name=name, branch=branch, ref=match[0].split('\t')[0],
                                              reporef=reporef, cbi_reporef=cbi_reporef,
-                                             subpath=cmdres.command.reqmsg.repo_location.subpath))
+                                             subpath=cmdres.command.reqmsg.repo_location.subpath,
+                                             restricted_access=cmdres.command.reqmsg.repo_location.restricted_access))
 
     # def receiveUnrecognizedMessage(self, msg, sender):
     #     logging.critical('GBR: GOT UNREC FROM %s: %s', sender, msg)
@@ -662,9 +682,13 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
         self.do_next(cmdres)
         origmsg = cmdres.command.tag
         if isinstance(origmsg, Local):
-            self._postproc(origmsg.pkgname, None, cmdres,
-                           cmdres.command.src,
-                           cmdres.command.requestor)
+            if origmsg.reference and cmdres:
+                origmsg.lcwls = cmdres
+                self.send(self.createActor(NixHash), origmsg)
+            else:
+                self._postproc(origmsg.pkgname, None, cmdres,
+                               cmdres.command.src,
+                               cmdres.command.requestor)
         elif isinstance(origmsg, GitRefWithLclSrc):
             if not cmdres:
                 self._postproc(origmsg.gitref.name, origmsg.gitref.branch, cmdres,
@@ -689,6 +713,19 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
             self._postproc(origmsg.pkgname, origmsg.pkgver, cmdres,
                            cmdres.command.src,
                            cmdres.command.requestor)
+    @staticmethod
+    def _fix_src_ver(origdict):
+        def _fsv(l):
+            if isversionline(l) and 'branch' in origdict:
+                return '  version = "%s";' % origdict['branch']
+            if issrcline(l):
+                return ('  src = %s;' %
+                        'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; fetchSubmodules=false; }' %
+                        origdict)
+            if 'mkDerivation,' in l:
+                return l.replace('mkDerivation,', 'mkDerivation, fetchgit,')
+            return l
+        return _fsv
     def receiveMsg_Success(self, msg, sender):
         if hasattr(msg, 'grwls'):
             cmdres = msg.grwls
@@ -697,12 +734,21 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
             self._postproc(origmsg.gitref.name, origmsg.gitref.branch,
                            cmdres, cmdres.command.src,
                            cmdres.command.requestor,
-                           lambda l: (('  version = "%s";' % origmsg.gitref.branch)
-                                      if isversionline(l) else
-                                      (('  src = %s;' %
-                                       'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; fetchSubmodules=false; }' %
-                                        origmsg.gitref.__dict__)
-                                       if issrcline(l) else l)))
+                           self._fix_src_ver(origmsg.gitref.__dict__)
+            )
+        elif hasattr(msg, 'lcwls'):
+            cmdres = msg.lcwls
+            origmsg = cmdres.command.tag
+            info = { 'sha256': msg.data,
+                     'reporef': origmsg.reference.source_loc,
+                     'ref': cmdres.command.tag.pkgref,
+            }
+            self._postproc(cmdres.command.tag.pkgname,
+                           cmdres.command.tag.pkgversion,
+                           cmdres,
+                           origmsg.reference.source_loc,
+                           cmdres.command.requestor,
+                           self._fix_src_ver(info))
         elif hasattr(msg, 'clonereq'):
             cmdres = msg.clonereq
             refmsg = cmdres.command.tag.refmsg
@@ -926,7 +972,7 @@ class NixHash(ActorTypeDispatcher, AutoCreate):
         msg = (Error(('Generating nix hash: ' + str(res.command.args), res.exitcode, res.errorstr),
                      'NixHash')
                if res.exitcode else Success(res.stdout.strip()))
-        for each in ('grwls', 'clonereq'):
+        for each in ('grwls', 'lcwls', 'clonereq'):
             if hasattr(res.command._nh_origmsg, each):
                 setattr(msg, each, getattr(res.command._nh_origmsg, each))
         self.send(res.command._nh_requestor, msg)
@@ -1558,9 +1604,10 @@ class ProjectConfig(SummaryBase):
 # Nix file output generation
 
 class InputFrom(object):
-    def __init__(self, filename, location_overrides=None):
+    def __init__(self, filename, location_overrides=None, location_references=None):
         self.filename = filename
         self.location_overrides = location_overrides
+        self.location_references = location_references
 
 
 class SrcOverrides(dict): pass
@@ -1610,6 +1657,16 @@ class ReadPackageSpec(ActorTypeDispatcher):
                        package_spec[i].name == pkgname:
                         package_spec[i] = package_spec[i](Local(inpfrom.location_overrides[pkgname]))
                         break
+            for pkgname in inpfrom.location_references:
+                for i in range(len(package_spec)):
+                    if isinstance(package_spec[i], StandardPackage) and \
+                       package_spec[i].name == pkgname:
+                        package_spec[i] = package_spec[i](Local(inpfrom.location_references[pkgname].split('@')[0]))
+                        if hasattr(package_spec[i], 'repo_location'):
+                            package_spec[i].local_location.reference = package_spec[i].repo_location
+                        else:
+                            print('Warning: no RepoIdent for referenced %s, promoting to local override.'%pkgname)
+                        break
 
         self.send(sender, package_spec)
 
@@ -1655,7 +1712,9 @@ class GenerateNixInfo(ActorTypeDispatcher):
             input_fname = ([ w for w in strmsg.split() if w.startswith('filename:') ]
                            + [ 'filename:package_spec'])[0].split(':')[1]
             self.send(self.createActor(ReadPackageSpec),
-                      InputFrom(input_fname, getattr(self, 'location_overrides', None)))
+                      InputFrom(input_fname,
+                                getattr(self, 'location_overrides', []),
+                                getattr(self, 'location_references', [])))
 
             self.noisy = 'noisily' in strmsg
             self.requestor = sender
@@ -1783,14 +1842,18 @@ class GenerateNixInfo(ActorTypeDispatcher):
                     # Local is the priority for dev
                     # But if there is a repo, get that info in case
                     # hydra output is being generated, unless there is
-                    # a source override
+                    # a source reference or override
                     if each.repo_location and self.cipkg and \
-                       each.name not in getattr(self, 'location_overrides', []):
+                       each.name not in getattr(self, 'location_overrides', []) and \
+                       each.name not in getattr(self, 'location_references', []):
                         self.send(gbr, each)
                         num_gbr_reqs += 1
                     if self.gencabal:
                         reqmsg = each.local_location
                         reqmsg.pkgname = each.name
+                        reqmsg.pkgversion = each.version
+                        if each.name in getattr(self, 'location_references', []):
+                            reqmsg.pkgref = (self.location_references[each.name] + '@master').split('@')[1]
                         reqmsg.noisily = self.noisy
                         self.send(self.c2nr, reqmsg)
                         self.status.add_setup_local()
@@ -2127,9 +2190,10 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
     def generate_vernix_run(self):
         inputs = sorted([k for k in self.packages])
         subpath = lambda r: ('/' + r.gitref.subpath
-                             if getattr(r, 'gitref', None)
+                             if getattr(r, 'gitref', None) and getattr(r.gitref, 'subpath', None)
                              else ('/' + r.subpath
                                    if getattr(r, 'subpath', None) else ''))
+        is_referenceable = lambda r: getattr(r, 'gitref', False) and not r.gitref.restricted_access
         output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
                    ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
                    ', hackage-index', # Provided as an explicit path input
@@ -2158,15 +2222,30 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # generation of nix specifications; if cabal2nix is
                    # provided with the Repository address, it will try
                    # to load these into the local store, which is an
-                   # invalid change during the build.  Only use the
-                   # local inputs for cabal2nix however and not the
-                   # actual nix specification (: and not =) because
-                   # otherwise the input specification doesn't match
-                   # the native project file and therefore this isn't
-                   # seen as a valid build substitute.
-                   "          " + "\n          ".join([ "%s: ${%s-src}%s \\"
+                   # invalid change during the build.  By using
+                   # references, the sha256 hash is generated from the
+                   # local hydra build input, but the actual build
+                   # input uses the regular fetchgit; this allows the
+                   # hash of the package to match local versions and
+                   # therefore this package is a valid binary
+                   # substitute.
+                   "          " + "\n          ".join([ "%s: ${%s-src}%s@${%s-src.revision} \\"
+                                                        % (k, k, subpath(self.packages[k]), k)
+                                                        for k in inputs
+                                                        if is_referenceable(self.packages[k])
+                   ]),
+                   # For restricted access repos, the hydra input must
+                   # be used directly instead of as a reference.
+                   # Using the input in this manner means that
+                   # although it will build correctly, it will not a
+                   # be a valid binary substitution for local builds
+                   # because the src will be different and cause a
+                   # different hash.
+                   "          " + "\n          ".join([ "%s= ${%s-src}%s \\"
                                                         % (k, k, subpath(self.packages[k]))
-                                                        for k in inputs]),
+                                                        for k in inputs
+                                                        if not is_referenceable(self.packages[k])
+                   ]),
                    # Specify --nolocal and --static so that vernix
                    # knows this *is* hydra running and that any Local
                    # source references should be ignored, and
@@ -2697,7 +2776,7 @@ if __name__ == "__main__":
         print('''Usage: %s [--help] [--fast] [--noisy] [--allowUnfree]
                            [--daily] [--hourly] [--static|--dynamic] [input-file]
                            [--dev]
-                           [name: path]
+                           [name: path] [name= path]
 
 Tool to read the package_spec file and generate a nix specification.
 The default input file is the first existing file in
@@ -2718,7 +2797,9 @@ nix specification:
                        RepoIdent(reposerver="https://github.com",
                                  team="github-team",
                                  reponame='packagerepo',
-                                 [subpath="subpath"]),
+                                 [subpath="subpath"],
+                                 [cbi_reposerver="https://github.com"],
+                                 [restricted_access=False]),
                        Local('/path/to/local/source'),
                        <all other Package arguments>)
 
@@ -2779,17 +2860,16 @@ re-evaluated at that time).  The --static mode is the default, and
 --dynamic specifies the opposite mode; if both are specified, the
 --static mode is used.
 
-Source location references and overrides can be supplied on the
-command-line.  An override specifies a location to use *instead* of
-the contents of the package specification file and is specified as
-"package-name= local-path".  A location reference is similar, but it
-only affects the cabal2nix invocation; the cabal2nix uses the local
-source reference as input but the output is modified back to the
-(repository) reference contained in the package specification input.
-This latter functionality is used for Hydra builds and other
-"restricted" or "pure" modes (cabal2nix will attempt to read from the
-remote repository and write the retrieved information into the store,
-which is an invalid store modification during a nix build).
+Source location references (name: dir) and overrides (name= dir) can
+be supplied on the command-line.  An override specifies a location to
+use *instead* of the contents of the package specification file and is
+specified as "package-name= local-path".  A location reference means
+that the referenced location is to be used for calculating the sha256
+hash of the source, but that the actual src reference in the output
+nix file will use the normal fetchgit reference.  Note that the
+cabal2nix that is invoked by vernix on hydra may only reference local
+files (due to the "restricted" pure evaluation mode, so either a
+source override or a source reference is needed.
 
 The --nolocal flag will instruct vernix to ignore any Local
 references; this is commonly used by Hydra or other remote build
