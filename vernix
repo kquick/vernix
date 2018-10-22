@@ -2200,7 +2200,8 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                              if getattr(r, 'gitref', None) and getattr(r.gitref, 'subpath', None)
                              else ('/' + r.subpath
                                    if getattr(r, 'subpath', None) else ''))
-        is_referenceable = lambda r: getattr(r, 'gitref', False) and not r.gitref.restricted_access
+        is_referenceable = lambda r: ((getattr(r, 'gitref', False) and not r.gitref.restricted_access) or
+                                      (hasattr(r, 'restricted_access') and not r.restricted_access))
         output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
                    ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
                    ', hackage-index', # Provided as an explicit path input
@@ -2236,11 +2237,11 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # hash of the package to match local versions and
                    # therefore this package is a valid binary
                    # substitute.
-                   "          " + "\n          ".join([ "%s: ${%s-src}%s@${%s-src.revision} \\"
-                                                        % (k, k, subpath(self.packages[k]), k)
-                                                        for k in inputs
-                                                        if is_referenceable(self.packages[k])
-                   ]),
+                   "\n".join([ "          %s: ${%s-src}%s@${%s-src.revision} \\"
+                               % (k, k, subpath(self.packages[k]), k)
+                               for k in inputs
+                               if is_referenceable(self.packages[k])
+                   ] +
                    # For restricted access repos, the hydra input must
                    # be used directly instead of as a reference.
                    # Using the input in this manner means that
@@ -2248,10 +2249,10 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # be a valid binary substitution for local builds
                    # because the src will be different and cause a
                    # different hash.
-                   "          " + "\n          ".join([ "%s= ${%s-src}%s \\"
-                                                        % (k, k, subpath(self.packages[k]))
-                                                        for k in inputs
-                                                        if not is_referenceable(self.packages[k])
+                             [ "          %s= ${%s-src}%s \\"
+                               % (k, k, subpath(self.packages[k]))
+                               for k in inputs
+                               if not is_referenceable(self.packages[k])
                    ]),
                    # Specify --nolocal and --static so that vernix
                    # knows this *is* hydra running and that any Local
