@@ -1253,7 +1253,7 @@ class StandardPackage_MixIn(object):
     def package_ref_StandardPackage(self, package, systems=None, allpkgnames=None):
         if systems:
             return ('    %(package_name)s = rlslib.forAllSystems (system:\n'
-                    '                           let pkgs = rlslib.pkgsFor system; in\n'
+                    '                           let pkgs = pkgsFor system; in\n'
                     '                           pkgs.%(package_name)s);'
                     % package.__dict__ % { 'systems': nixstrlist(systems) })
         return '    %(package_name)s = pkgs.%(package_name)s;' % package.__dict__
@@ -1283,6 +1283,11 @@ class StandardPackage_MixIn(object):
                     '               packageSet = import nixpkgs;',
                     '               nixpkgsArgs = { config = config; };',
                     '           };',
+                    '',
+                    ' # pkgsFor was broken by specifying it as: inherit (pkgsCross null) pkgsFor',
+                    ' # this is a compatibility version that may need to be adjusted when pkgsFor',
+                    ' # is fixed.  KWQ 2018-11-05',
+                    ' pkgsFor = if builtins.hasAttr "mkPkgsFor" rlslib then rlslib.mkPkgsFor null else rlslib.pkgsFor;',
             ]:
                 yield each
 
@@ -1300,7 +1305,7 @@ class HaskellPackage_MixIn(object):
         end = 'pkgs.haskell.packages.${ghcver}.%(package_name)s'
         if systems:
             middle = middle + [ 'rlslib.forAllSystems (system:',
-                                '    let pkgs = rlslib.pkgsFor system; in',
+                                '    let pkgs = pkgsFor system; in',
             ]
             end = end + ")"
         if middle:
