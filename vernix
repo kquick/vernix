@@ -959,7 +959,7 @@ class NixHash(ActorTypeDispatcher, AutoCreate):
     create_run = lambda self: self.createActor(RunCommand)
 
     def receiveMsg_Local(self, localmsg, sender):
-        cmd = Command('/run/current-system/sw/bin/nix-hash',
+        cmd = Command('nix-hash',
                       ['--type', 'sha256', '--base32', localmsg.source_loc],
                       logger=None if getattr(localmsg, 'noisily', False) else False,
                       logtag='nix-hash')
