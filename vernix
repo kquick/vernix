@@ -708,7 +708,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            cmdres.command.src,
                            cmdres.command.requestor,
                            lambda l: '  version = "%s";' % origmsg.branch
-                           if isversionline(l) else l)
+                           if (origmsg.branch != 'master' and isversionline(l)) else l)
         else:
             self._postproc(origmsg.pkgname, origmsg.pkgver, cmdres,
                            cmdres.command.src,
