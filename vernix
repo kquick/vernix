@@ -1673,8 +1673,36 @@ class ReadPackageSpec(ActorTypeDispatcher):
                 for i in range(len(package_spec)):
                     if isinstance(package_spec[i], StandardPackage) and \
                        package_spec[i].name == pkgname:
+                        # There is a local version of the source that
+                        # should be used as a reference for
+                        # calculating the hash, but the actual
+                        # generated project nix file should still use
+                        # the normal retrieval from repo
+                        # (e.g. fetchgit).  Annoyingly however, some
+                        # reference locations (e.g. those provided by
+                        # Hydra's GitInput process) will leave repo
+                        # admin information (e.g. the .git directory)
+                        # whereas fetchgit will remove that
+                        # information, so the hash computed from the
+                        # Hydra GitInput will not match.  Therefore, a
+                        # local temporary copy of the sources must be
+                        # made so that the repository reference
+                        # information can be removed from the
+                        # temporary reference and the source hash
+                        # subsequently correctly computed therefrom.
                         package_spec[i] = package_spec[i](Local(inpfrom.location_references[pkgname].split('@')[0]))
+                        print('..local for',package_spec[i].name,'is',package_spec[i].local_location)
                         if hasattr(package_spec[i], 'repo_location'):
+                            if os.path.exists(os.path.join(package_spec[i].local_location.source_loc, '.git')):
+                                import tempfile, shutil
+                                td = tempfile.TemporaryDirectory()
+                                tgt = os.path.join(td.name,'refsrc')
+                                shutil.copytree(package_spec[i].local_location.source_loc, tgt,
+                                                symlinks=True,
+                                                ignore=shutil.ignore_patterns('.git'))
+                                print('....Created',tgt,'for local reference',package_spec[i].local_location)
+                                package_spec[i] = package_spec[i](Local(tgt))
+                                package_spec[i].local_location.is_temp = td  # tmpdir will be auto-deleted when this is destroyed
                             package_spec[i].local_location.reference = package_spec[i].repo_location
                         else:
                             print('Warning: no RepoIdent for referenced %s, promoting to local override.'%pkgname)
