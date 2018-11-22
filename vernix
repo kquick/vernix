@@ -719,9 +719,13 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
             if isversionline(l) and 'branch' in origdict:
                 return '  version = "%s";' % origdict['branch']
             if issrcline(l):
-                return ('  src = %s;' %
-                        'fetchgit { url="%(reporef)s"; rev="%(ref)s"; sha256="%(sha256)s"; fetchSubmodules=false; }' %
-                        origdict)
+                src = 'fetchgit { url="%(reporef)s"; rev="%(ref)s"; fetchSubmodules=false; sha256="%(sha256)s"; }'
+                srcrepl = (('  src = %s;\n'
+                            '  postUnpack = "sourceRoot+=/%%(subpath)s; echo source root reset to $sourceRoot";'
+                            % src)
+                           if origdict.get('subpath', None) else
+                           ('  src = %s;' % src)) % origdict
+                return srcrepl
             if 'mkDerivation,' in l:
                 return l.replace('mkDerivation,', 'mkDerivation, fetchgit,')
             return l
@@ -743,6 +747,8 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                      'reporef': origmsg.reference.source_loc,
                      'ref': cmdres.command.tag.pkgref,
             }
+            if origmsg.reference.subpath:
+                info['subpath'] = origmsg.reference.subpath
             self._postproc(cmdres.command.tag.pkgname,
                            cmdres.command.tag.pkgversion,
                            cmdres,
@@ -754,18 +760,10 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
             refmsg = cmdres.command.tag.refmsg
             refmsg.sha256 = msg.data
             self.send(cmdres.command.tag.cloner, ActorExitRequest())
-            src = 'fetchgit { url="%(reporef)s"; rev="%(ref)s"; fetchSubmodules=false; sha256="%(sha256)s"; }'
-            srcrepl = (('  src = %s;\n'
-                        '  postUnpack = "sourceRoot+=/%%(subpath)s; echo source root reset to $sourceRoot";'
-                        % src)
-                       if refmsg.subpath else
-                       ('  src = %s;' % src)) % refmsg.__dict__
             self._postproc(refmsg.name, refmsg.branch,
                            cmdres, cmdres.command.src,
                            cmdres.command.tag.requestor,
-                           lambda l: (('  version = "%s";' % refmsg.branch)
-                                      if isversionline(l) else
-                                      (srcrepl if issrcline(l) else l)))
+                           self._fix_src_ver(refmsg.__dict__))
 
         elif isinstance(msg.data, CloneReq):
             cmd = Command('cabal2nix', [os.path.join(msg.data.local_dir, msg.data.refmsg.subpath)
