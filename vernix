@@ -1669,6 +1669,7 @@ class ReadPackageSpec(ActorTypeDispatcher):
                        package_spec[i].name == pkgname:
                         package_spec[i] = package_spec[i](Local(inpfrom.location_overrides[pkgname]))
                         break
+        if inpfrom.location_references:
             for pkgname in inpfrom.location_references:
                 for i in range(len(package_spec)):
                     if isinstance(package_spec[i], StandardPackage) and \
