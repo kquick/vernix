@@ -957,13 +957,36 @@ class NixHash(ActorTypeDispatcher, AutoCreate):
     create_run = lambda self: self.createActor(RunCommand)
 
     def receiveMsg_Local(self, localmsg, sender):
+        # The nix-hash computation is often called for a source reference.
+        # Annoyingly however, some reference locations (e.g. those provided
+        # by Hydra's GitInput process) will sometimes leave repo admin
+        # information (e.g. the .git directory) whereas fetchgit will
+        # always remove that information, so the hash computed from the
+        # Hydra GitInput will not match.  Therefore, a local temporary copy
+        # of the sources must be made so that the repository reference
+        # information can be removed from the temporary reference and the
+        # source hash subsequently correctly computed therefrom.
+        checkout_loc = (localmsg.source_loc[:-len(localmsg.reference.subpath)]
+                        if hasattr(localmsg, 'reference') and localmsg.reference.subpath and
+                           localmsg.source_loc.endswith(localmsg.reference.subpath)
+                        else localmsg.source_loc)
+        td = None
+        if os.path.exists(os.path.join(checkout_loc, '.git')):
+            import tempfile, shutil
+            td = tempfile.TemporaryDirectory()
+            tgt = os.path.join(td.name,'refsrc')
+            shutil.copytree(checkout_loc, tgt,
+                            symlinks=True,
+                            ignore=shutil.ignore_patterns('.git'))
+            checkout_loc = tgt
         cmd = Command('nix-hash',
-                      ['--type', 'sha256', '--base32', localmsg.source_loc],
+                      ['--type', 'sha256', '--base32', checkout_loc],
                       logger=None if getattr(localmsg, 'noisily', False) else False,
                       logtag='nix-hash')
         cmd._nh_requestor = sender
         cmd._nh_origmsg = localmsg
-        self.send(self.createActor(RunCommand), cmd)  # KWQ: self.run
+        cmd._temporary = td  # when destroyed, the temporary location is removed.
+        self.send(self.run, cmd)
 
     def receiveMsg_CommandResult(self, res, sender):
         self.send(sender, ActorExitRequest())
@@ -1677,31 +1700,10 @@ class ReadPackageSpec(ActorTypeDispatcher):
                         # calculating the hash, but the actual
                         # generated project nix file should still use
                         # the normal retrieval from repo
-                        # (e.g. fetchgit).  Annoyingly however, some
-                        # reference locations (e.g. those provided by
-                        # Hydra's GitInput process) will leave repo
-                        # admin information (e.g. the .git directory)
-                        # whereas fetchgit will remove that
-                        # information, so the hash computed from the
-                        # Hydra GitInput will not match.  Therefore, a
-                        # local temporary copy of the sources must be
-                        # made so that the repository reference
-                        # information can be removed from the
-                        # temporary reference and the source hash
-                        # subsequently correctly computed therefrom.
+                        # (e.g. fetchgit).
                         package_spec[i] = package_spec[i](Local(inpfrom.location_references[pkgname].split('@')[0]))
                         print('..local for',package_spec[i].name,'is',package_spec[i].local_location)
                         if hasattr(package_spec[i], 'repo_location'):
-                            if os.path.exists(os.path.join(package_spec[i].local_location.source_loc, '.git')):
-                                import tempfile, shutil
-                                td = tempfile.TemporaryDirectory()
-                                tgt = os.path.join(td.name,'refsrc')
-                                shutil.copytree(package_spec[i].local_location.source_loc, tgt,
-                                                symlinks=True,
-                                                ignore=shutil.ignore_patterns('.git'))
-                                print('....Created',tgt,'for local reference',package_spec[i].local_location)
-                                package_spec[i] = package_spec[i](Local(tgt))
-                                package_spec[i].local_location.is_temp = td  # tmpdir will be auto-deleted when this is destroyed
                             package_spec[i].local_location.reference = package_spec[i].repo_location
                         else:
                             print('Warning: no RepoIdent for referenced %s, promoting to local override.'%pkgname)
