@@ -2242,9 +2242,9 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                              if getattr(r, 'gitref', None) and getattr(r.gitref, 'subpath', None)
                              else ('/' + r.subpath
                                    if getattr(r, 'subpath', None) else ''))
-        is_referenceable = lambda r: False
-        # is_referenceable = lambda r: ((getattr(r, 'gitref', False) and not r.gitref.restricted_access) or
-        #                               (hasattr(r, 'restricted_access') and not r.restricted_access))
+        # is_referenceable = lambda r: False
+        is_referenceable = lambda r: ((getattr(r, 'gitref', False) and not r.gitref.restricted_access) or
+                                      (hasattr(r, 'restricted_access') and not r.restricted_access))
         output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
                    ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
                    ', hackage-index', # Provided as an explicit path input
@@ -2280,7 +2280,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # hash of the package to match local versions and
                    # therefore this package is a valid binary
                    # substitute.
-                   "\n".join([ "          %s: ${%s-src}%s@${%s-src.revision} \\"
+                   "\n".join([ "          %s: ${%s-src}%s@${%s-src.rev} \\"
                                % (k, k, subpath(self.packages[k]), k)
                                for k in inputs
                                if is_referenceable(self.packages[k])
@@ -2311,7 +2311,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    "        (cd $src; find . -name '*.nix' -exec cp --reflink=auto --parents --no-preserve=mode {} $out/ \;)",
                    # '        cp --reflink=auto --remove-destination *.nix $out/;',
                    "      '';",
-                   "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix cacert curl gzip ];",
+                   "    buildInputs = [ vernix pybuilder git cacert nix-prefetch-git cabal2nix cacert curl gzip nix ];",
                    '    src = %s;' % (self.projdef_filepath() or './.'),
                    '    inherit vernix ' + ' '.join([i + '-src' for i in inputs]) + ';',
                    '  };',
