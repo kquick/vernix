@@ -907,7 +907,7 @@ class NixExprEval(ActorTypeDispatcher, AutoCreate):
                       logger=None if getattr(exprmsg, 'noisily', False) else False,
                       logtag='nix-eval')
         cmd._nee_requestor = sender
-        self.send(self.createActor(RunCommand), cmd)  # KWQ: self.run
+        self.send(self.run, cmd)
 
     def receiveMsg_CommandResult(self, res, sender):
         self.send(sender, ActorExitRequest())
