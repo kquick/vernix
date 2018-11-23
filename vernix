@@ -25,6 +25,14 @@ import tempfile
 
 EMAILRESPONSIBLE = False
 
+# If RESETVERSIONTOBRANCH is True, then the version for packages will
+# be modified to the branch specified in the RepoIdent.  This can be
+# helpful for user inspection, but it also breaks binary-substitution
+# from a hydra build, so the default is False to disable this (the
+# version will be specified as normal... e.g. from the .cabal file via
+# cabal2nix for haskell packages).
+RESETVERSIONTOBRANCH = False
+
 class Settable(object):
     def __call__(self, **kw):
         newobj = self.__class__()
@@ -708,7 +716,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                            cmdres.command.src,
                            cmdres.command.requestor,
                            lambda l: '  version = "%s";' % origmsg.branch
-                           if (origmsg.branch != 'master' and isversionline(l)) else l)
+                           if (RESETVERSIONTOBRANCH and origmsg.branch != 'master' and isversionline(l)) else l)
         else:
             self._postproc(origmsg.pkgname, origmsg.pkgver, cmdres,
                            cmdres.command.src,
@@ -716,7 +724,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
     @staticmethod
     def _fix_src_ver(origdict):
         def _fsv(l):
-            if isversionline(l) and 'branch' in origdict:
+            if RESETVERSIONTOBRANCH and isversionline(l) and 'branch' in origdict:
                 return '  version = "%s";' % origdict['branch']
             if issrcline(l):
                 src = 'fetchgit { url="%(reporef)s"; rev="%(ref)s"; fetchSubmodules=false; sha256="%(sha256)s"; }'
