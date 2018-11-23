@@ -2920,7 +2920,9 @@ hash of the source, but that the actual src reference in the output
 nix file will use the normal fetchgit reference.  Note that the
 cabal2nix that is invoked by vernix on hydra may only reference local
 files (due to the "restricted" pure evaluation mode, so either a
-source override or a source reference is needed.
+source override or a source reference is needed.  Note that source
+overrides and references are primarily used by the vernix-run output
+generated for Hydra.
 
 The --nolocal flag will instruct vernix to ignore any Local
 references; this is commonly used by Hydra or other remote build
