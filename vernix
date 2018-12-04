@@ -2144,7 +2144,7 @@ def jobset_defaults(inputs={}, **kw):
     rval = { 'checkinterval': 300,
              'schedulingshares': 1,
              'emailoverride': '',
-             'keepnr': 3,
+             'keepnr': 6,
     }
     rval.update(kw)
     inps = inputs.copy()
