@@ -2193,9 +2193,11 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
 
     def receiveMsg_int(self, num_gitrefs, sender):
         self.num_gitrefs = num_gitrefs
+        self.check_done()
 
     def receiveMsg_str(self, input_path, sender):
         self.input_path = input_path
+        self.check_done()
 
     def receiveMsg_GitRefWithLclSrc(self, lclgitref, sender):
         if not hasattr(self, 'packages'):
@@ -2211,14 +2213,15 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
 
     def receiveMsg_GitRemoteURL(self, gitremote, sender):
         self.gitremote = gitremote
+        self.check_done()
 
     def check_done(self):
         if getattr(self, 'project', None) and \
            hasattr(self, 'input_path') and \
            hasattr(self, 'gitremote') and \
            hasattr(self, 'num_gitrefs') and \
-           getattr(self, 'packages', None) and \
-           len(self.packages) == self.num_gitrefs:
+           (self.num_gitrefs == 0 or
+            (len(getattr(self, 'packages', [])) == self.num_gitrefs)):
             self.generate_vernix_run()
 
     def projdef_filepath(self, fname=None):
@@ -2237,7 +2240,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
         return 'vernix_output'
 
     def generate_vernix_run(self):
-        inputs = sorted([k for k in self.packages])
+        inputs = sorted([k for k in getattr(self, 'packages', [])])
         subpath = lambda r: ('/' + r.gitref.subpath
                              if getattr(r, 'gitref', None) and getattr(r.gitref, 'subpath', None)
                              else ('/' + r.subpath
@@ -2369,6 +2372,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
     def receiveMsg_int(self, num_gitrefs, sender):
         self.num_gitrefs = num_gitrefs
         self.send(self.vernix_run, num_gitrefs)
+        self.check_done()
 
     def receiveMsg_str(self, input_path, sender):
         self.send(self.vernix_run, input_path)
@@ -2384,6 +2388,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
         self.gitremote.proj_url_update(self.variants.get('proj_reposerver', None))
         self.send(sender, ActorExitRequest())
         self.send(self.vernix_run, gitremote)
+        self.check_done()
 
     def receiveMsg_GitRefWithLclSrc(self, lclgitref, sender):
         # Initially supplied by the main coordinator, but
@@ -2420,8 +2425,8 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
            getattr(self, 'gitremote', None) and \
            hasattr(self, 'vernix_run_file') and \
            hasattr(self, 'num_gitrefs') and \
-           getattr(self, 'packages', None) and \
-           len(self.packages) == self.num_gitrefs:
+           (self.num_gitrefs == 0 or
+            len(getattr(self, 'packages', [])) == self.num_gitrefs):
             self.generate_jobspec()
 
     def vernix_run_jobname(self, repo_branch=None):
@@ -2451,7 +2456,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
             { p + '-src' : { "type": "git",
                              "value": "%s %s" % gitval(p, revbr, brlist),
                              "emailresponsible": self.packages[p].email_responsible,
-              } for p in self.packages
+              } for p in getattr(self, 'packages', [])
             }.items(), key=lambda e:e[0]))
         projbld = lambda revbr, brlist: jobset_defaults(
             description = ("Build project %s %s nix description" %
@@ -2624,6 +2629,7 @@ class GenerateHydraProjectDecl(ActorTypeDispatcher, AutoCreate):
         self.gitremote = gitremote
         self.gitremote.proj_url_update(getattr(self, 'proj_reposerver', None))
         self.send(sender, ActorExitRequest())
+        self.try_generate_output(sender)
 
     def receiveMsg_Error(self, errmsg, sender):
         if hasattr(self, 'requester'):
