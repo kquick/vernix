@@ -2252,7 +2252,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    '}:',
                    'with (import <nixpkgs> {});',
                    'let',
-                   '  pybuilder = pkgs.python36.withPackages (pp: with pp; [ thespian setproctitle ]);',
+                   '  pybuilder = pkgs.python37.withPackages (pp: with pp; [ thespian setproctitle ]);',
                    'in rec {',
                    '  %s = stdenv.mkDerivation rec {' % self.jobname(),
                    '    name = "' + self.project.name + '-master";',
