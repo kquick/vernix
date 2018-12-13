@@ -2248,10 +2248,11 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
         # is_referenceable = lambda r: False
         is_referenceable = lambda r: ((getattr(r, 'gitref', False) and not r.gitref.restricted_access) or
                                       (hasattr(r, 'restricted_access') and not r.restricted_access))
-        output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs]),
-                   ', vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
-                   ', hackage-index', # Provided as an explicit path input
-                   ', projectdef',
+        output = [ '{ ' + '\n, '.join([i + '-src' for i in inputs] +
+                                      [ 'vernix-src',  # This is built locally, and must be an input; it is not (yet) part of nixpkgs.
+                                        'hackage-index', # Provided as an explicit path input
+                                        'projectdef',
+                                      ]),
                    '}:',
                    'with (import <nixpkgs> {});',
                    'let',
