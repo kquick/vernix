@@ -1720,7 +1720,7 @@ class ReadPackageSpec(ActorTypeDispatcher):
         self.send(sender, package_spec)
 
         here = inpfrom.location_overrides.get('here', '.') if inpfrom.location_overrides else '.'
-        print('Using here:',here)
+        # print('Using here:',here)
         apply_loc_override = lambda d, r: (os.path.join(inpfrom.location_overrides.get(d, d), r)
                                            if not d or d == '/' or d in inpfrom.location_overrides else
                                            apply_loc_override(os.path.split(d)[0],
@@ -1734,7 +1734,7 @@ class ReadPackageSpec(ActorTypeDispatcher):
                 nixfile = os.path.join(here, each) if os.path.basename(each) == each else each
                 if inpfrom.location_overrides:
                     nixfile = apply_loc_override(*os.path.split(nixfile))
-                print('..pkg',each,'as',name,'from',nixfile)
+                # print('..pkg',each,'as',name,'from',nixfile)
                 self.send(sender,
                           NixPackageSpec(StandardPackage(name), nixfile))
 
