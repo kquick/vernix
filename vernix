@@ -2227,7 +2227,7 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
     def projdef_filepath(self, fname=None):
         if fname is None:
             # Path to root
-            return os.path.join(*tuple(['..']*(len(os.path.split(self.gitremote.local_subpath))-1) + ['.']))
+            return 'projectdef'
         # Root path to file
         return os.path.join(self.gitremote.local_subpath, fname)
 
