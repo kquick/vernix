@@ -2284,33 +2284,39 @@ class GenerateHydraVernixRun(ActorTypeDispatcher):
                    # hash of the package to match local versions and
                    # therefore this package is a valid binary
                    # substitute.
-                   "\n".join([ "          %s: ${%s-src}%s@${%s-src.rev} \\"
-                               % (k, k, subpath(self.packages[k]), k)
-                               for k in inputs
-                               if is_referenceable(self.packages[k])
-                   ] +
-                   # For restricted access repos, the hydra input must
-                   # be used directly instead of as a reference.
-                   # Using the input in this manner means that
-                   # although it will build correctly, it will not a
-                   # be a valid binary substitution for local builds
-                   # because the src will be different and cause a
-                   # different hash.
-                             [ "          %s= ${%s-src}%s \\"
-                               % (k, k, subpath(self.packages[k]))
-                               for k in inputs
-                               if not is_referenceable(self.packages[k])
-                   ]),
+                   "\n".join(
+                       [ "          %s: ${%s-src}%s@${%s-src.rev} \\"
+                         % (k, k, subpath(self.packages[k]), k)
+                         for k in inputs
+                         if is_referenceable(self.packages[k])
+                       ] +
+                       # For restricted access repos, the hydra input must
+                       # be used directly instead of as a reference.
+                       # Using the input in this manner means that
+                       # although it will build correctly, it will not a
+                       # be a valid binary substitution for local builds
+                       # because the src will be different and cause a
+                       # different hash.
+                       [ "          %s= ${%s-src}%s \\"
+                         % (k, k, subpath(self.packages[k]))
+                         for k in inputs
+                         if not is_referenceable(self.packages[k])
+                       ] +
+                       # Translate relative and input references to
+                       # the output location (crucial for tagalong
+                       # nix files) and also ensure the array is
+                       # never empty (if there are no self.packages)
+                       # which would cause a blank output line.
+                       [ "          here= $out \\",
+                         "          $src= $out \\",
+                       ]
+                   ),
                    # Specify --nolocal and --static so that vernix
                    # knows this *is* hydra running and that any Local
                    # source references should be ignored, and
                    # cabal2nix should be performed directly instead of
                    # embedded into the output nix expression for
-                   # dynamic evaluation.  Also translate relative and
-                   # input references to the output location (crucial
-                   # for tagalong nix files).
-                   "          here= $out \\",
-                   "          $src= $out \\",
+                   # dynamic evaluation.
                    "          --static --nolocal",
                    "        (cd $src; find . -name '*.nix' -exec cp --reflink=auto --parents --no-preserve=mode {} $out/ \;)",
                    # '        cp --reflink=auto --remove-destination *.nix $out/;',
