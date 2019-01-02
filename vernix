@@ -615,6 +615,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
 
     def receiveMsg_Local(self, localmsg, sender):
         cmd = Command('cabal2nix', ['--dont-fetch-submodules',
+                                    '--compiler', 'ghc-8.4',  # TBD: generate explicit variants... (default fallback?).
                                     localmsg.source_loc],
                       logger=None if getattr(localmsg, 'noisily', False) else False,
                       logtag='cabal2nix:local',
@@ -636,6 +637,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
     def receiveMsg_GitRef(self, refmsg, sender):
         args = ['--revision', refmsg.ref,
                 '--dont-fetch-submodules',
+                '--compiler', 'ghc-8.4',  # TBD: generate explicit variants... (default fallback?).
         ]
         if refmsg.subpath:
             args.extend(['--subpath', refmsg.subpath])
@@ -651,6 +653,7 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
                       [os.path.join(refmsg.lclref, refmsg.gitref.subpath)
                        if refmsg.gitref.subpath else refmsg.lclref,
                        '--dont-fetch-submodules'
+                       '--compiler', 'ghc-8.4',  # TBD: generate explicit variants... (default fallback?).
                       ],
                       logger=None if getattr(refmsg, 'noisily', False) else False,
                       logtag='cabal2nix:git+local',
@@ -661,9 +664,12 @@ class Cabal2Nix(ActorTypeDispatcher, AutoCreate):
     def receiveMsg_HackageRef(self, hackagemsg, sender):
         localdb = 'hackage/01-index.tar'
         if os.path.exists(localdb):
-            args = ['--hackage-db', localdb]
+            args = ['--hackage-db', localdb,
+                    '--compiler', 'ghc-8.4',  # TBD: generate explicit variants... (default fallback?).
+            ]
         else:
-            args = []
+            args = [ '--compiler', 'ghc-8.4',  # TBD: generate explicit variants... (default fallback?).
+            ]
         args = args + [ 'cabal://' + hackagemsg.pkgname +
                         ('-' + hackagemsg.pkgver if hackagemsg.pkgver else '')]
         cmd = Command('cabal2nix', args,
