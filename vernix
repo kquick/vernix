@@ -1339,7 +1339,8 @@ class HaskellPackage_MixIn(object):
         middle = []
         end = 'pkgs.haskell.packages.${ghcver}.%(package_name)s'
         if systems:
-            middle = middle + [ 'rlslib.forAllSystems (system:',
+            middle = middle + [ '',
+                                'rlslib.forAllSystems (system:',
                                 '    let pkgs = pkgsFor system; in',
             ]
             end = end + ")"
