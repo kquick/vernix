@@ -2501,7 +2501,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                 # KWQ:   A: no inline, need user to commit this.
                 { "projectdef": {
                     "type": "git",
-                    "value": self.gitremote.remote_url,
+                    "value": self.gitremote.remote_url + " saw_adjust",
                     "emailresponsible": True,
                 },
                   "vernix-src": {
