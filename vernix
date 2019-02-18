@@ -2506,7 +2506,7 @@ class GenerateHydraJobsetDecl(ActorTypeDispatcher, AutoCreate):
                 },
                   "vernix-src": {
                       "type": "git",
-                      "value": "https://github.com/kquick/vernix.git",
+                      "value": "https://github.com/kquick/vernix.git lcltest",
                       "emailresponsible": True,
                   },
                   "hackage-index" : {
