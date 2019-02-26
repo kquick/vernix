@@ -1864,8 +1864,8 @@ class GenerateNixInfo(ActorTypeDispatcher):
                                       p.name in getattr(self, 'location_references', []))
 
         for each in package_spec:
-            each.noisily = self.noisy
             if isinstance(each, Project):
+                each.noisily = self.noisy
                 each.project_file = self.summary_fname % each.name
                 if self.cipkg:
                     self.send(self.cipkg, each)
