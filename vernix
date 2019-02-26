@@ -2033,7 +2033,7 @@ class GenerateNixInfo(ActorTypeDispatcher):
                 if self.cipkg:
                     gitrefmsg.email_responsible = each.email_responsible
                     self.send(self.cipkg, gitrefmsg)
-                if self.nolocal or not each.local_location:
+                if isinstance(each, HaskellPackage) and (self.nolocal or not each.local_location):
                     self.send(self.c2nr, gitrefmsg)
         else:
             if self.cipkg:
