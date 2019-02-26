@@ -1548,11 +1548,12 @@ class ProjectConfig(SummaryBase):
     def _generate_summary_data(self, project_fname, sample_pkgname, pkg_dict, allpkgnames):
         for each in [ '{ nixpkgs ? <nixpkgs>',
                       ', ghcver ? "ghc822"',
+                      ', system ? builtins.currentSystem',
                       '}:',
                       '',
                       'let',
                       '',
-                      '  pkgs = import nixpkgs { inherit config; };',
+                      '  pkgs = import nixpkgs { inherit config system; };',
                       '',
                       '  sphinx_1_7_9 = pkgs.python3Packages.sphinx.overridePythonAttrs ( o: rec {',
                       '                     version = "1.7.9";',
