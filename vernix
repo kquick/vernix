@@ -1358,11 +1358,11 @@ class HaskellPackage_MixIn(object):
                          for pkg in sorted(package_list) ]
         return (
             [ '      haskell = p.haskell // {',
-              '        compiler = p.haskell.compiler // {',
-              '          ghc844 = p.haskell.compiler.ghc844.override {',
-              '            sphinx = sphinx_1_7_9;',
-              '          };',
-              '        };',
+              # '        compiler = p.haskell.compiler // {',
+              # '          ghc844 = p.haskell.compiler.ghc844.override {',
+              # '            sphinx = sphinx_1_7_9;',
+              # '          };',
+              # '        };',
               '',
               '        packages = p.haskell.packages // {',
               '          ${ghcver} = p.haskell.packages.${ghcver}.override {',
