@@ -2184,7 +2184,7 @@ def jobset_defaults(inputs={}, **kw):
           # "description": "NOTSET",
           # "nixexprinput": "NOTSET",
           # "nixexprpath": "NOTSET",
-          "enableemail": True,
+          "enableemail": False,
           "inputs": join_dicts(inps,
                                { "nixpkgs": { "type": "git",
                                               "value": nixpkgs_val,
