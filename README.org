@@ -1,3 +1,5 @@
+NOTE:  The vernix tool was intended to provide management of specific package versions and support for building both locally and under hydra.  It achieved this goal for many common uses, but it had trouble supporting specific modifications and adjustments to packages: vernix used its own input representation that was translated to nix, and so each of these modifications and adjustments needed to be replicated in the vernix input language as well.  It became apparent that a small and simple representation of nix build configurations was ill-conceived and rather than continuing to create a parallel representation, a more native representation would be a better approach.  To this end, the devnix ([[https://github.com/kquick/devnix]]) module is the modern replacement, and subsequently the briareus tool ([[https://github.com/kquick/briareus]]) for generating build configurations enhances the devnix usage.  No further development of vernix is planned.
+
 * Vernix
 
 This is a tool to generate nix expressions for packages with specific versions.
